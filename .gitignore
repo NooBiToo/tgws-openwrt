@@ -8,3 +8,8 @@
 *.swp
 .DS_Store
 Thumbs.db
+
+# Каталог docs/ внутренний (спека, заметки о проверке на живом железе), как и в
+# соседнем проекте. Документация ДЛЯ ПОЛЬЗОВАТЕЛЯ лежит в корне и отслеживается:
+# README.md, README.en.md, GUIDE.ru.md, GUIDE.en.md, SETTINGS.ru.md.
+/docs/
