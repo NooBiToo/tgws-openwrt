@@ -182,7 +182,8 @@ func (s *Server) handle(c net.Conn) {
 	dc, media, ok := pickDC(h, dst.Addr())
 	if !ok {
 		if st.NoteUnknown(dst.Addr().String()) {
-			s.cfg.Logf("no DC known for %s: extend dcmap if clients keep using it", dst.Addr())
+			s.cfg.Logf("no DC known for %s (transport %#x, obfuscated=%v, dc index in init=%d, %d bytes read): extend dcmap if clients keep using it",
+				dst.Addr(), uint32(h.proto), h.hasDC, h.dcIdx, len(h.consumed))
 		}
 		s.fallback(c, h.consumed, dst, label, "unknown DC")
 		return

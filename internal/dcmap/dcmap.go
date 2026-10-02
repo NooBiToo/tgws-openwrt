@@ -16,8 +16,13 @@ import (
 // здесь не найден, уходит прямым TCP, а адрес попадает в счётчики как
 // неизвестный — по ним таблицу и пополняют.
 var byIP = map[netip.Addr]int{
-	netip.MustParseAddr("149.154.175.50"):  1,
-	netip.MustParseAddr("149.154.167.51"):  2,
+	netip.MustParseAddr("149.154.175.50"): 1,
+	netip.MustParseAddr("149.154.167.51"): 2,
+	// .41 и .50 добавлены по живой проверке (2026-10-03): Desktop называет в
+	// init DC2 при подключении к ним, а Android в прямом соединении индекс DC
+	// не заполняет и опирается только на эту таблицу.
+	netip.MustParseAddr("149.154.167.41"):  2,
+	netip.MustParseAddr("149.154.167.50"):  2,
 	netip.MustParseAddr("149.154.175.100"): 3,
 	netip.MustParseAddr("149.154.167.91"):  4,
 	netip.MustParseAddr("149.154.171.5"):   5,
