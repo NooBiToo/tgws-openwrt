@@ -9,6 +9,7 @@ import (
 
 	"tgws/internal/mtproto"
 	"tgws/internal/probe"
+	"tgws/internal/ws"
 	"tgws/internal/ws/wstest"
 )
 
@@ -98,6 +99,57 @@ func TestCheckReportsAnUnreachableServer(t *testing.T) {
 	d.Addr = "127.0.0.1:1" // порт, на котором никто не слушает
 	if err := probe.Check(context.Background(), d, 2, false, time.Second); err == nil {
 		t.Fatal("an unreachable server must be an error")
+	}
+}
+
+// Демон пробует второй домен DC, только если первый не сработал. Диагностика
+// ведёт себя так же: лишнее соединение к тому же адресу не нужно и, как
+// показала живая проверка, само может попасть под ограничение провайдера и дать
+// ложное замечание.
+func TestRunStopsAtTheFirstDomainThatAnswers(t *testing.T) {
+	srv := fakeTelegram(t, nil, false)
+	var asked []string
+	res := probe.RunWith(context.Background(), []string{"kws2.web.telegram.org", "kws2-1.web.telegram.org"},
+		func(domain string) ws.Dialer {
+			asked = append(asked, domain)
+			return srv.Dialer("/apiws")
+		}, 2, false, 2*time.Second)
+	if len(res) != 1 || !res[0].OK || res[0].Domain != "kws2.web.telegram.org" {
+		t.Fatalf("results = %+v, want exactly the first domain, answering", res)
+	}
+	if len(asked) != 1 {
+		t.Fatalf("the second domain was contacted although the first answered: %v", asked)
+	}
+}
+
+func TestRunFallsThroughToTheSecondDomain(t *testing.T) {
+	srv := fakeTelegram(t, nil, false)
+	res := probe.RunWith(context.Background(), []string{"kws2.web.telegram.org", "kws2-1.web.telegram.org"},
+		func(domain string) ws.Dialer {
+			d := srv.Dialer("/apiws")
+			if domain == "kws2.web.telegram.org" {
+				d.Addr = "127.0.0.1:1" // первый домен недоступен
+			}
+			return d
+		}, 2, false, 2*time.Second)
+	if len(res) != 2 || res[0].OK || !res[1].OK {
+		t.Fatalf("results = %+v, want the first failing and the second answering", res)
+	}
+	if res[0].Error == "" {
+		t.Fatal("a failed domain must carry its error")
+	}
+}
+
+func TestRunReportsEveryFailure(t *testing.T) {
+	srv := fakeTelegram(t, nil, false)
+	res := probe.RunWith(context.Background(), []string{"a.example", "b.example"},
+		func(string) ws.Dialer {
+			d := srv.Dialer("/apiws")
+			d.Addr = "127.0.0.1:1"
+			return d
+		}, 2, false, time.Second)
+	if len(res) != 2 || res[0].OK || res[1].OK {
+		t.Fatalf("results = %+v, want two failures", res)
 	}
 }
 

@@ -3,44 +3,131 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-msgid "Active connections"
-msgstr "Активные соединения"
+msgid "%d subnets, built-in list"
+msgstr "подсетей: %d, встроенный список"
+
+msgid "%d subnets, updated %d d ago"
+msgstr "подсетей: %d, обновлён %d дн. назад"
+
+msgid "%d total, %d active"
+msgstr "%d всего, %d активных"
+
+msgid "%d, built-in list"
+msgstr "%d, встроенный список"
+
+msgid "%d, updated %s"
+msgstr "%d, обновлён %s"
+
+msgid "%s is available"
+msgstr "Доступна версия %s"
+
+msgid "Address"
+msgstr "Адрес"
+
+msgid "Addresses with no known data center"
+msgstr "Адреса без известного дата-центра"
+
+msgid "Asking Telegram…"
+msgstr "Спрашиваю Telegram…"
 
 msgid "Carries Telegram traffic of every device on the network over WebSocket, which often works where the direct connection is slow or blocked. Nothing needs to be set up on the devices."
 msgstr "Пропускает трафик Telegram всех устройств сети через WebSocket — часто это работает там, где прямое соединение медленное или заблокировано. На самих устройствах ничего настраивать не нужно."
 
-msgid "Check the system log: logread -e tgws"
-msgstr "Посмотрите системный журнал: logread -e tgws"
+msgid "Check now"
+msgstr "Проверить сейчас"
+
+msgid "Checking…"
+msgstr "Проверяю…"
+
+msgid "Checks"
+msgstr "Проверки"
 
 msgid "Command failed"
 msgstr "Команда завершилась с ошибкой"
 
+msgid "Connection test"
+msgstr "Проверка связи"
+
+msgid "Connections"
+msgstr "Соединения"
+
+msgid "Connections go through WebSocket"
+msgstr "Соединения идут через WebSocket"
+
+msgid "Custom interfaces are set: check their firewall zones yourself."
+msgstr "Заданы свои интерфейсы: проверьте их зоны файрвола самостоятельно."
+
+msgid "DC2 and DC4 (default)"
+msgstr "DC2 и DC4 (по умолчанию)"
+
+msgid "DC4 only"
+msgstr "Только DC4"
+
 msgid "DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or enter none to use no WebSocket at all."
 msgstr "Пары DC:IP через запятую. Дата-центры, которых здесь нет, идут напрямую. Если не грузятся фото и видео, оставьте только 4:149.154.167.220 или введите none, чтобы не использовать WebSocket вовсе."
+
+msgid "Daemon"
+msgstr "Демон"
+
+msgid "Data center"
+msgstr "Дата-центр"
+
+msgid "Diagnostics"
+msgstr "Диагностика"
+
+msgid "Direct access to Telegram from the router"
+msgstr "Прямой доступ к Telegram с роутера"
+
+msgid "Done"
+msgstr "Готово"
 
 msgid "Enable"
 msgstr "Включить"
 
-msgid "Expected an http(s) address"
-msgstr "Ожидается адрес http(s)"
+msgid "Error"
+msgstr "Ошибка"
 
-msgid "Telegram subnet list URL"
-msgstr "Адрес списка подсетей Telegram"
-
-msgid "Once a week the router refreshes the list of Telegram subnets from this address. Empty means the official core.telegram.org list. If that address is blocked from the router, the built-in or the last downloaded list stays in use; you can point this to a reachable mirror."
-msgstr "Раз в неделю роутер обновляет список подсетей Telegram по этому адресу. Пусто — официальный список core.telegram.org. Если этот адрес с роутера недоступен, остаётся зашитый или последний скачанный список; можно указать доступное зеркало."
+msgid "Every Telegram address has a known data center"
+msgstr "Для каждого адреса Telegram известен дата-центр"
 
 msgid "Expected a number like 0x9527"
 msgstr "Ожидается число вида 0x9527"
 
-msgid "Mark for traffic that cannot use WebSocket"
-msgstr "Метка для трафика, который нельзя провести через WebSocket"
+msgid "Expected an http(s) address"
+msgstr "Ожидается адрес http(s)"
 
-msgid "Telegram traffic that cannot go over WebSocket (websites, data centers without a WebSocket endpoint) is sent directly by default. To send it through the TrustTunnel tunnel instead, enter the tunnel mark, 0x9527 by default. Empty means direct."
-msgstr "Трафик Telegram, который нельзя провести через WebSocket (сайты, дата-центры без цели WebSocket), по умолчанию идёт напрямую. Чтобы направить его через туннель TrustTunnel, введите метку туннеля, по умолчанию 0x9527. Пусто — напрямую."
+msgid "Expected pairs like 149.154.167.35:2, separated by commas"
+msgstr "Ожидаются пары вида 149.154.167.35:2 через запятую"
 
 msgid "Expected pairs like 2:149.154.167.220, separated by commas, or none"
 msgstr "Ожидаются пары вида 2:149.154.167.220 через запятую или none"
+
+msgid "From the settings to a real request to Telegram: what works and what to fix."
+msgstr "От настроек до настоящего запроса к Telegram: что работает и что исправить."
+
+msgid "General"
+msgstr "Общие"
+
+msgid "GitHub unreachable, showing the last cached result"
+msgstr "GitHub недоступен, показан последний сохранённый результат"
+
+msgid "Hide"
+msgstr "Скрыть"
+
+msgid "IP:DC pairs, comma-separated, for Telegram addresses the package could not place by itself. Android does not name the data center in its connection, so for a new address it is worked out automatically; add a pair here only if an address keeps landing among the unknown ones on the Status page."
+msgstr "Пары IP:DC через запятую для адресов Telegram, которые пакет не смог отнести к дата-центру сам. Android в своём соединении не называет дата-центр, поэтому для нового адреса он определяется автоматически; добавляйте пару сюда, только если адрес постоянно остаётся среди неизвестных на странице «Состояние»."
+
+msgid "Integration with TrustTunnel"
+msgstr "Совместная работа с TrustTunnel"
+
+msgid "Interception"
+msgstr "Перехват"
+
+msgid "It goes directly. Set a mark in Settings to send it through TrustTunnel."
+msgstr "Он идёт напрямую. Задайте метку в настройках, чтобы направить его через TrustTunnel."
+
+msgid "It is off. Turn it on in Settings and press Save & Apply."
+msgstr "Выключено. Включите в настройках и нажмите «Сохранить и применить»."
 
 msgid "LAN interfaces"
 msgstr "Интерфейсы локальной сети"
@@ -48,11 +135,50 @@ msgstr "Интерфейсы локальной сети"
 msgid "Local port"
 msgstr "Локальный порт"
 
-msgid "Only IPv4 is intercepted. If the router has IPv6 enabled, Telegram may connect over IPv6 and bypass this; disabling IPv6 on the LAN makes the acceleration complete."
-msgstr "Перехватывается только IPv4. Если на роутере включён IPv6, Telegram может подключаться по IPv6 и обходить перехват; отключение IPv6 в локальной сети делает ускорение полным."
+msgid "Log"
+msgstr "Журнал"
+
+msgid "Manual address to data center map"
+msgstr "Ручное соответствие адресов дата-центрам"
+
+msgid "Many connections arrived, but none went through WebSocket. The clients may use a proxy or a transport this package does not recognise."
+msgstr "Пришло много соединений, но ни одно не прошло через WebSocket. Возможно, клиенты используют прокси или транспорт, который пакет не распознаёт."
+
+msgid "Mark for traffic that cannot use WebSocket"
+msgstr "Метка для трафика, который нельзя провести через WebSocket"
+
+msgid "Network"
+msgstr "Сеть"
+
+msgid "No IPv6 on the LAN"
+msgstr "В локальной сети нет IPv6"
+
+msgid "No WebSocket targets are set, so everything goes the direct way."
+msgstr "Цели WebSocket не заданы, поэтому всё идёт напрямую."
+
+msgid "Now"
+msgstr "Сейчас"
+
+msgid "Once a week the router refreshes the list of Telegram subnets from this address. Empty means the official core.telegram.org list. If that address is blocked from the router, the built-in or the last downloaded list stays in use; you can point this to a reachable mirror."
+msgstr "Раз в неделю роутер обновляет список подсетей Telegram по этому адресу. Пусто — официальный список core.telegram.org. Если этот адрес с роутера недоступен, остаётся зашитый или последний скачанный список; можно указать доступное зеркало."
+
+msgid "Only IPv4 is intercepted. A client with an IPv6 address may reach Telegram over IPv6 and bypass the acceleration. Turn IPv6 off on the LAN to make it complete."
+msgstr "Перехватывается только IPv4. Клиент с адресом IPv6 может подключиться к Telegram по IPv6 и обойти ускорение. Отключите IPv6 в локальной сети, чтобы ускорение было полным."
 
 msgid "Only letters, digits, dots, dashes and spaces are allowed"
 msgstr "Допустимы только буквы, цифры, точки, дефисы и пробелы"
+
+msgid "Only some of the addresses answer. It works, but connections may be slow to start."
+msgstr "Отвечают не все адреса. Работает, но соединения могут устанавливаться медленнее."
+
+msgid "Other Telegram traffic"
+msgstr "Остальной трафик Telegram"
+
+msgid "Other traffic"
+msgstr "Остальной трафик"
+
+msgid "Package"
+msgstr "Пакет"
 
 msgid "Passed through directly"
 msgstr "Пропущено напрямую"
@@ -60,17 +186,53 @@ msgstr "Пропущено напрямую"
 msgid "Please wait"
 msgstr "Подождите"
 
+msgid "Press Start and read the log below."
+msgstr "Нажмите «Запустить» и прочитайте журнал ниже."
+
+msgid "Press the button to run the checks."
+msgstr "Нажмите кнопку, чтобы запустить проверки."
+
 msgid "Restart"
 msgstr "Перезапустить"
+
+msgid "Result"
+msgstr "Результат"
+
+msgid "Run checks"
+msgstr "Запустить проверки"
+
+msgid "Run install.sh again to update: it refreshes both the package and the daemon."
+msgstr "Для обновления снова запустите install.sh: он обновляет и пакет, и демон."
 
 msgid "Run install.sh again: it installs the daemon next to this package."
 msgstr "Запустите install.sh ещё раз: он ставит демон рядом с этим пакетом."
 
+msgid "Running checks — this takes a few seconds…"
+msgstr "Выполняю проверки — это займёт несколько секунд…"
+
+msgid "Running for"
+msgstr "Работает"
+
 msgid "Running…"
 msgstr "Выполняется…"
 
+msgid "Sends a real request to every Telegram data center from the settings the same way the daemon does, and shows which address answers and how fast."
+msgstr "Отправляет настоящий запрос в каждый дата-центр Telegram из настроек так же, как это делает демон, и показывает, какой адрес отвечает и как быстро."
+
 msgid "Sent / received"
 msgstr "Отправлено / получено"
+
+msgid "Service"
+msgstr "Служба"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Show all checks"
+msgstr "Показать все проверки"
+
+msgid "Show the checks that passed"
+msgstr "Показать пройденные проверки"
 
 msgid "Space-separated list whose traffic is intercepted. Empty means the device of the lan network. Only interfaces of firewall zones that accept input to the router work: Telegram cannot connect from a zone set to reject."
 msgstr "Список через пробел, трафик которого перехватывается. Пусто — устройство сети lan. Работают только интерфейсы зон фаервола, которые принимают входящий трафик к роутеру: из зоны с запретом (reject) Telegram не подключится."
@@ -78,8 +240,17 @@ msgstr "Список через пробел, трафик которого пе
 msgid "Start"
 msgstr "Запустить"
 
+msgid "State"
+msgstr "Состояние"
+
+msgid "Status"
+msgstr "Состояние"
+
 msgid "Stop"
 msgstr "Остановить"
+
+msgid "Subnets"
+msgstr "Подсети"
 
 msgid "Telegram"
 msgstr "Telegram"
@@ -87,41 +258,242 @@ msgstr "Telegram"
 msgid "Telegram acceleration is off"
 msgstr "Ускорение Telegram выключено"
 
-msgid "Telegram addresses with no known data center"
-msgstr "Адреса Telegram, для которых не известен дата-центр"
+msgid "Telegram acceleration is turned on"
+msgstr "Ускорение Telegram включено"
+
+msgid "Telegram answers over WebSocket"
+msgstr "Telegram отвечает по WebSocket"
+
+msgid "Telegram does not answer through this address. If the direct path is blocked too, Telegram will not work. Check the WebSocket targets in Settings."
+msgstr "Telegram не отвечает через этот адрес. Если прямой путь тоже заблокирован, Telegram работать не будет. Проверьте цели WebSocket в настройках."
 
 msgid "Telegram is accelerated for every device on the network"
 msgstr "Telegram ускорен для всех устройств сети"
 
+msgid "Telegram subnet list URL"
+msgstr "Адрес списка подсетей Telegram"
+
+msgid "Telegram traffic that cannot go over WebSocket (websites, data centers without a WebSocket endpoint) is sent directly by default. To send it through the TrustTunnel tunnel instead, enter the tunnel mark, 0x9527 by default. Empty means direct."
+msgstr "Трафик Telegram, который нельзя провести через WebSocket (сайты, дата-центры без цели WebSocket), по умолчанию идёт напрямую. Чтобы направить его через туннель TrustTunnel, введите метку туннеля, по умолчанию 0x9527. Пусто — напрямую."
+
+msgid "Telegram traffic that cannot use WebSocket"
+msgstr "Трафик Telegram, который нельзя провести через WebSocket"
+
+msgid "Test the connection"
+msgstr "Проверить связь"
+
+msgid "The LAN firewall zone accepts connections to the router"
+msgstr "Зона файрвола локальной сети принимает соединения к роутеру"
+
+msgid "The LAN interfaces exist"
+msgstr "Интерфейсы локальной сети существуют"
+
+msgid "The binary /usr/bin/tgws is missing. Run install.sh again: it installs the daemon next to this package."
+msgstr "Файл /usr/bin/tgws отсутствует. Запустите install.sh ещё раз: он ставит демон рядом с этим пакетом."
+
+msgid "The daemon accepts connections"
+msgstr "Демон принимает соединения"
+
+msgid "The daemon has not reported in yet. If this persists, the log below says why."
+msgstr "Демон ещё не откликнулся. Если так продолжается, причина — в журнале ниже."
+
 msgid "The daemon runs, but Telegram traffic is not intercepted"
 msgstr "Демон работает, но трафик Telegram не перехватывается"
 
-msgid "The firewall rules were not loaded. Telegram works as before. See logread -e tgws."
-msgstr "Правила фаервола не загружены. Telegram работает как раньше. Смотрите logread -e tgws."
+msgid "The downloaded list is more than 45 days old. Try \"Update subnet list\" on the Status page; if the official address is blocked from the router, set a mirror in Settings."
+msgstr "Скачанному списку больше 45 дней. Нажмите «Обновить список подсетей» на странице «Состояние»; если официальный адрес с роутера недоступен, укажите зеркало в настройках."
+
+msgid "The firewall rules are not loaded, for example after the firewall was stopped. Telegram works as before. Press Restart, or see the log below."
+msgstr "Правила файрвола не загружены, например после остановки файрвола. Telegram работает как раньше. Нажмите «Перезапустить» или смотрите журнал ниже."
+
+msgid "The firewall table inet tgws is missing, so Telegram is not intercepted. Restart the service."
+msgstr "Таблица файрвола inet tgws отсутствует, поэтому Telegram не перехватывается. Перезапустите службу."
+
+msgid "The interception rules are loaded"
+msgstr "Правила перехвата загружены"
+
+msgid "The list of Telegram subnets is up to date"
+msgstr "Список подсетей Telegram актуален"
+
+msgid "The mark is wrong or has no routing rule: that traffic is dropped. Check that TrustTunnel is running and that the mark matches its fwmark."
+msgstr "Метка неверна или для неё нет правила маршрутизации: этот трафик отбрасывается. Проверьте, что TrustTunnel запущен и метка совпадает с его fwmark."
 
 msgid "The port the daemon listens on. Telegram connections are redirected to it by the firewall; change it only if the port is taken."
-msgstr "Порт, на котором слушает демон. Соединения Telegram перенаправляются на него фаерволом; меняйте, только если порт занят."
+msgstr "Порт, на котором слушает демон. Соединения Telegram перенаправляются на него файрволом; меняйте, только если порт занят."
 
-msgid "The service did not start. The system log says why."
-msgstr "Служба не запустилась. Причина — в системном журнале."
+msgid "The service did not start. The log below says why."
+msgstr "Служба не запустилась. Причина — в журнале ниже."
 
 msgid "The service is not running"
 msgstr "Служба не работает"
 
+msgid "The service is not running. See the log on the Status page or run: logread -e tgws"
+msgstr "Служба не работает. Смотрите журнал на странице «Состояние» или выполните: logread -e tgws"
+
+msgid "The service is running"
+msgstr "Служба работает"
+
+msgid "The service is starting"
+msgstr "Служба запускается"
+
+msgid "The service runs, but the daemon does not report in. It may have failed to take its port; see the log."
+msgstr "Служба работает, но демон не откликается. Возможно, ему не удалось занять свой порт; смотрите журнал."
+
+msgid "The tgws daemon is installed"
+msgstr "Демон tgws установлен"
+
 msgid "The tgws daemon is not installed"
 msgstr "Демон tgws не установлен"
+
+msgid "The zone does not accept input, so the firewall rejects the redirected connections and Telegram cannot connect from it. Use a zone with input set to ACCEPT."
+msgstr "Зона не принимает входящий трафик, поэтому файрвол отклоняет перенаправленные соединения, и Telegram из неё не подключится. Используйте зону с input ACCEPT."
+
+msgid "These addresses had no known data center and went the direct way. They are worked out automatically among the data centers that have WebSocket; if the list keeps growing, add them by hand in Settings."
+msgstr "У этих адресов не было известного дата-центра, и они ушли напрямую. Среди дата-центров с WebSocket они определяются автоматически; если список продолжает расти, добавьте их вручную в настройках."
+
+msgid "These interfaces do not exist. Fix \"LAN interfaces\" in Settings."
+msgstr "Этих интерфейсов не существует. Исправьте «Интерфейсы локальной сети» в настройках."
 
 msgid "Through WebSocket"
 msgstr "Через WebSocket"
 
-msgid "Turn it on below and press Save & Apply."
-msgstr "Включите ниже и нажмите «Сохранить и применить»."
+msgid "Time"
+msgstr "Время"
 
-msgid "Version"
-msgstr "Версия"
+msgid "TrustTunnel does not route Telegram"
+msgstr "TrustTunnel не маршрутизирует Telegram"
+
+msgid "TrustTunnel has Telegram subnets in its lists. tgws intercepts them first, so that traffic does not use the tunnel. Remove the Telegram list from TrustTunnel, or set a mark in Settings to send what WebSocket cannot carry through it."
+msgstr "В списках TrustTunnel есть подсети Telegram. tgws перехватывает их раньше, поэтому этот трафик не идёт через туннель. Уберите список Telegram из TrustTunnel или задайте метку в настройках, чтобы то, что нельзя провести через WebSocket, шло через туннель."
+
+msgid "TrustTunnel is not installed."
+msgstr "TrustTunnel не установлен."
+
+msgid "Turn it on in Settings and press Save & Apply, or press Start to run it right now."
+msgstr "Включите в настройках и нажмите «Сохранить и применить» либо нажмите «Запустить», чтобы запустить сейчас."
+
+msgid "Update check unavailable: no network and no cached result"
+msgstr "Проверка обновлений недоступна: нет сети и нет сохранённого результата"
+
+msgid "Update subnet list"
+msgstr "Обновить список подсетей"
+
+msgid "Versions"
+msgstr "Версии"
+
+msgid "WebSocket"
+msgstr "WebSocket"
 
 msgid "WebSocket targets"
 msgstr "Цели WebSocket"
 
+msgid "Whether the service starts when the router boots. The Start button on the Status page runs it right now."
+msgstr "Запускается ли служба при загрузке роутера. Кнопка «Запустить» на странице «Состояние» запускает её прямо сейчас."
+
+msgid "answers"
+msgstr "отвечает"
+
+msgid "blocked or very slow: the case this package is for"
+msgstr "закрыт или очень медленный: именно для этого случая нужен пакет"
+
+msgid "check"
+msgstr "проверить"
+
+msgid "checks passed: %d, remarks: %d, problems: %d, skipped: %d"
+msgstr "проверок пройдено: %d, замечаний: %d, проблем: %d, пропущено: %d"
+
+msgid "d"
+msgstr "д"
+
+msgid "days ago"
+msgstr "дн. назад"
+
+msgid "directly"
+msgstr "напрямую"
+
+msgid "directly (no tunnel)"
+msgstr "напрямую (без туннеля)"
+
+msgid "everything checks out"
+msgstr "всё в порядке"
+
+msgid "h"
+msgstr "ч"
+
+msgid "h ago"
+msgstr "ч назад"
+
+msgid "just now"
+msgstr "только что"
+
+msgid "min"
+msgstr "мин"
+
+msgid "min ago"
+msgstr "мин назад"
+
+msgid "never"
+msgstr "никогда"
+
+msgid "no answer"
+msgstr "нет ответа"
+
+msgid "none"
+msgstr "нет"
+
+msgid "none: everything goes the direct way"
+msgstr "нет: всё идёт напрямую"
+
+msgid "none: no WebSocket, everything goes the direct way"
+msgstr "none: без WebSocket, всё идёт напрямую"
+
+msgid "not checked"
+msgstr "не проверялось"
+
+msgid "not installed"
+msgstr "не установлен"
+
+msgid "off"
+msgstr "выключен"
+
+msgid "ok"
+msgstr "ок"
+
+msgid "on, port %s"
+msgstr "включён, порт %s"
+
+msgid "problem"
+msgstr "проблема"
+
+msgid "reachable"
+msgstr "доступен"
+
+msgid "s"
+msgstr "с"
+
+msgid "skipped"
+msgstr "пропущено"
+
+msgid "the installed version is newer than the latest release (%s)"
+msgstr "установленная версия новее последнего релиза (%s)"
+
+msgid "there are problems"
+msgstr "есть проблемы"
+
+msgid "through the TrustTunnel tunnel (0x9527)"
+msgstr "через туннель TrustTunnel (0x9527)"
+
+msgid "through the TrustTunnel tunnel (mark %s)"
+msgstr "через туннель TrustTunnel (метка %s)"
+
 msgid "unknown"
 msgstr "неизвестно"
+
+msgid "up to date"
+msgstr "актуальная версия"
+
+msgid "working"
+msgstr "работает"
+
+msgid "works, with remarks"
+msgstr "работает, есть замечания"

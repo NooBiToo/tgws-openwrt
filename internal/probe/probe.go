@@ -35,23 +35,42 @@ type Result struct {
 // Marshal сериализует итоги в JSON для бэкенда LuCI.
 func Marshal(r []Result) ([]byte, error) { return json.Marshal(r) }
 
-// Run проверяет все домены DC на указанном IP и возвращает итог по каждому.
+// Run проверяет домены DC на указанном IP и возвращает итог по каждому из
+// тех, что пришлось спросить.
 func Run(ctx context.Context, target string, dc int, media bool, timeout time.Duration) []Result {
-	var out []Result
-	for _, domain := range dcmap.Domains(dc, media) {
-		d := ws.Dialer{
+	return RunWith(ctx, dcmap.Domains(dc, media), func(domain string) ws.Dialer {
+		return ws.Dialer{
 			Addr:       net.JoinHostPort(target, "443"),
 			ServerName: domain,
 			Path:       "/apiws",
 			Timeout:    timeout,
 		}
+	}, dc, media, timeout)
+}
+
+// RunWith — Run с подменяемым способом соединения (для тестов). Домены
+// пробуются по порядку и только до первого ответившего: так ведёт себя и сам
+// демон, а лишнее соединение к тому же адресу не нужно — на живой сети именно
+// вторая подряд попытка попадала под ограничение провайдера и давала ложный
+// отказ.
+func RunWith(ctx context.Context, domains []string, dialer func(domain string) ws.Dialer,
+	dc int, media bool, timeout time.Duration) []Result {
+	var out []Result
+	for _, domain := range domains {
+		d := dialer(domain)
 		start := time.Now()
 		err := Check(ctx, d, dc, media, timeout)
-		r := Result{Domain: domain, Target: target, OK: err == nil, Ms: time.Since(start).Milliseconds()}
+		r := Result{Domain: domain, Target: d.Addr, OK: err == nil, Ms: time.Since(start).Milliseconds()}
+		if host, _, splitErr := net.SplitHostPort(d.Addr); splitErr == nil {
+			r.Target = host
+		}
 		if err != nil {
 			r.Error = err.Error()
 		}
 		out = append(out, r)
+		if err == nil {
+			break
+		}
 	}
 	return out
 }

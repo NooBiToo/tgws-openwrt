@@ -1,9 +1,9 @@
 {
 	"luci-app-tgws": {
-		"description": "Grant access to the Telegram WebSocket proxy settings",
+		"description": "Grant access to the Telegram WebSocket proxy settings and diagnostics",
 		"read": {
 			"ubus": {
-				"luci.tgws": [ "status" ]
+				"luci.tgws": [ "status", "log", "versions", "probe", "diagnose" ]
 			},
 			"uci": [ "tgws" ]
 		},

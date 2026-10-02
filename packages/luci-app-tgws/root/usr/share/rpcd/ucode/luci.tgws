@@ -1,10 +1,22 @@
 'use strict';
 
-import { popen, readfile, access } from 'fs';
+import { popen, readfile, writefile, access, stat, mkdir } from 'fs';
 
 const BIN = '/usr/bin/tgws';
+const LIBDIR = '/usr/libexec/tgws';
 const STATS = '/var/run/tgws.json';
+const SUBNETS_FILE = '/etc/tgws/subnets.txt';
+const CACHE_DIR = '/var/cache/tgws';
+const VERSION_CACHE = CACHE_DIR + '/release.json';
+const RELEASE_URL = 'https://api.github.com/repos/NooBiToo/tgws-openwrt/releases/latest';
+// Шесть часов: четыре запроса в сутки — исчезающая доля от 60 неавторизованных
+// запросов в час, которыми GitHub ограничивает один адрес.
+const RELEASE_TTL = 21600;
+// Файл счётчиков демон обновляет каждые 5 секунд; старше — демон не отвечает.
+const STATS_FRESH = 30;
 
+// sh() склеивает stderr в stdout: нужно там, где текст ошибки сам является
+// результатом (управление службой, журнал).
 function sh(cmd) {
 	let p = popen(cmd + ' 2>&1');
 	if (!p)
@@ -14,12 +26,35 @@ function sh(cmd) {
 	return { code: code, out: out };
 }
 
+// sh_out() отдаёт только stdout. Обязателен там, где вывод разбирается:
+// предупреждения утилит в stderr не должны становиться данными.
+function sh_out(cmd) {
+	let p = popen(cmd + ' 2>/dev/null');
+	if (!p)
+		return { code: -1, out: '' };
+	let out = p.read('all') ?? '';
+	let code = p.close();
+	return { code: code, out: out };
+}
+
 function shq(s) {
+	// Одинарные кавычки в оболочке: закрыть, вставить экранированную, открыть.
 	return "'" + replace('' + s, "'", "'\\''") + "'";
 }
 
-function uciget(path) {
-	return trim(sh('uci -q get ' + shq(path)).out);
+// Настройки одним вызовом uci, а не по одному на опцию: страница состояния
+// опрашивается каждые 10 секунд, и лишние запуски процессов на слабом роутере
+// заметны. Значения приходят в виде tgws.main.port='5454'.
+function config() {
+	let cfg = { enabled: '0', port: '5454', dc_ip: '2:149.154.167.220,4:149.154.167.220',
+	            ip_dc: '', lan_devices: '', fallback_mark: '', subnets_url: '' };
+	let r = sh_out('uci -q show tgws.main');
+	for (let line in split(r.out, '\n')) {
+		let m = match(line, /^tgws\.main\.([a-z_]+)='(.*)'$/);
+		if (m && exists(cfg, m[1]))
+			cfg[m[1]] = m[2];
+	}
+	return cfg;
 }
 
 function read_stats() {
@@ -33,24 +68,221 @@ function read_stats() {
 	}
 }
 
+function daemon_version() {
+	if (!access(BIN))
+		return null;
+	let v = trim(sh_out(shq(BIN) + ' -version').out);
+	return length(v) ? v : null;
+}
+
+// Подсети, которые реально использует генератор правил: зашитый список или
+// скачанный. Список берётся у самого gen-nft, чтобы выбор не дублировался.
+function subnets_info() {
+	let r = sh_out(shq(LIBDIR + '/gen-nft') + ' --subnets');
+	let list = [];
+	for (let line in split(r.out, '\n'))
+		if (length(trim(line)))
+			push(list, trim(line));
+	let st = stat(SUBNETS_FILE);
+	// Скачанным считается список, если файл есть и в нём совпадает число строк:
+	// иначе генератор откатился на зашитый (файл пуст или испорчен).
+	let custom = false;
+	if (st && st.size > 0) {
+		let file = split(trim(readfile(SUBNETS_FILE) ?? ''), '\n');
+		custom = length(file) == length(list);
+	}
+	return { count: length(list), custom: custom, updated: custom ? st.mtime : null, list: list };
+}
+
+function trusttunnel_present() {
+	return access('/etc/init.d/trusttunnel') ? true : false;
+}
+
+// Версии как у соседнего проекта: числовое сравнение по группам, суффикс
+// -rN и префикс v отбрасываются.
+function vercmp(a, b) {
+	function parts(s) {
+		s = replace('' + s, /^[vV]/, '');
+		s = replace(s, /-.*$/, '');
+		let out = [];
+		for (let p in split(s, '.')) {
+			let n = match(p, /^([0-9]+)/);
+			push(out, n ? +n[1] : 0);
+		}
+		return out;
+	}
+	let pa = parts(a), pb = parts(b);
+	let n = length(pa) > length(pb) ? length(pa) : length(pb);
+	for (let i = 0; i < n; i++) {
+		let x = i < length(pa) ? pa[i] : 0;
+		let y = i < length(pb) ? pb[i] : 0;
+		if (x != y) return x > y ? 1 : -1;
+	}
+	return 0;
+}
+
+// Последний релиз с кэшем на диске. tag == null означает «узнать не удалось» —
+// ни сети, ни кэша, — и это не то же самое, что «обновлений нет». Кэш, в
+// котором последний релиз СТАРШЕ установленного, отстал и отбрасывается: иначе
+// страница писала бы «актуальная версия» тому, кто отстал на несколько выпусков.
+function latest_release(installed, refresh) {
+	let out = { tag: null, checked_at: null, stale: false };
+	let st = stat(VERSION_CACHE);
+	let now = time();
+
+	function from_cache() {
+		try {
+			let c = json(readfile(VERSION_CACHE) ?? '{}');
+			out.tag = c.tag ?? null;
+			out.checked_at = c.checked_at ?? null;
+		} catch (e) {
+			out.tag = null;
+			out.checked_at = null;
+		}
+	}
+
+	if (!refresh && st && (now - st.mtime) < RELEASE_TTL) {
+		from_cache();
+		if (out.tag != null && installed != null && vercmp(out.tag, installed) < 0) {
+			out.tag = null;
+			out.checked_at = null;
+		}
+	}
+	if (out.tag != null)
+		return out;
+
+	let rr = sh_out('curl -fsS --max-time 15 ' + shq(RELEASE_URL));
+	if (rr.code == 0) {
+		let tag = null;
+		try {
+			tag = json(rr.out)?.tag_name;
+		} catch (e) { }
+		if (tag != null) {
+			out.tag = tag;
+			out.checked_at = now;
+			mkdir('/var/cache');
+			mkdir(CACHE_DIR);
+			if (!writefile(VERSION_CACHE, sprintf('%J', { tag: tag, checked_at: now })))
+				sh('logger -t tgws ' + shq('error: could not write the release cache to ' + VERSION_CACHE));
+		}
+		return out;
+	}
+
+	// GitHub недоступен: отдаём кэш с пометкой stale, а не ошибку — знать свою
+	// версию полезно и без сети.
+	if (st) {
+		from_cache();
+		if (out.tag != null)
+			out.stale = true;
+	}
+	return out;
+}
+
+// Цели WebSocket из настроек: массив { dc, ip }. Значения приходят из UCI,
+// поэтому проходят строгую проверку формата прежде чем попасть в оболочку.
+function ws_targets(cfg) {
+	let out = [];
+	if (cfg.dc_ip == 'none')
+		return out;
+	for (let item in split(cfg.dc_ip, ',')) {
+		let m = match(trim(item), /^([0-9]+):([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})$/);
+		if (m)
+			push(out, { dc: +m[1], ip: m[2] });
+	}
+	return out;
+}
+
+// Проверка WebSocket для списка целей. Цели проверяются ПАРАЛЛЕЛЬНО: каждая
+// занимает до нескольких секунд, а ubus ждёт ответа ограниченное время, и
+// последовательный прогон нескольких DC его бы исчерпал.
+function probe_targets(targets, media) {
+	if (!length(targets))
+		return [];
+	let dir = trim(sh_out('mktemp -d').out);
+	if (!length(dir) || substr(dir, 0, 5) != '/tmp/')
+		return [];
+	let cmd = '';
+	for (let t in targets)
+		cmd += shq(BIN) + ' -probe -dc ' + int(t.dc) + ' -target ' + shq(t.ip) +
+			(media ? ' -media' : '') + ' > ' + shq(dir + '/' + t.dc) + ' 2>/dev/null & ';
+	sh(cmd + 'wait');
+	let out = [];
+	for (let t in targets) {
+		let results = [];
+		try {
+			results = json(readfile(dir + '/' + t.dc) ?? '[]') ?? [];
+		} catch (e) {
+			results = [];
+		}
+		push(out, { dc: t.dc, target: t.ip, results: results });
+	}
+	sh('rm -rf ' + shq(dir));
+	return out;
+}
+
+// Зоны файрвола как строки "имя|input|сети": по ним проверяется, принимает ли
+// зона входящий трафик к роутеру. Разбор uci show в awk, а не модулем uci:
+// модуль не входит в минимальную сборку ucode, на которой проверяется синтаксис.
+function firewall_zones() {
+	let r = sh_out('uci -q show firewall | awk \'' +
+		'/^firewall\\.@zone\\[[0-9]+\\]=zone/ { z = $0; sub(/=.*/, "", z); n[z] = ""; next } ' +
+		'{ k = $0; sub(/\\.[a-z_]+=.*/, "", k); if (!(k in n)) next; ' +
+		'  o = $0; sub(/^[^=]*\\./, "", o); f = o; sub(/=.*/, "", f); v = o; sub(/^[^=]*=/, "", v); gsub(/\'\\\'\'/, "", v); ' +
+		'  if (f == "name") nm[k] = v; else if (f == "input") inp[k] = v; else if (f == "network") net[k] = v } ' +
+		'END { for (k in n) print nm[k] "|" inp[k] "|" net[k] }\'');
+	let zones = [];
+	for (let line in split(r.out, '\n')) {
+		let p = split(trim(line), '|');
+		if (length(p) == 3)
+			push(zones, { name: p[0], input: p[1], networks: split(p[2], ' ') });
+	}
+	let d = trim(sh_out('uci -q get firewall.@defaults[0].input').out);
+	return { zones: zones, default_input: length(d) ? d : 'REJECT' };
+}
+
+function mark_hex(m) {
+	m = trim(m);
+	if (!length(m))
+		return null;
+	if (match(m, /^0[xX][0-9a-fA-F]{1,8}$/))
+		return lc(m);
+	if (match(m, /^[0-9]{1,10}$/))
+		return sprintf('0x%x', +m);
+	return null;
+}
+
 return {
 	'luci.tgws': {
 
+	// Состояние. Опрашивается каждые 10 секунд, поэтому только дешёвые
+	// проверки: тяжёлые (сеть, проба WebSocket) живут в diagnose.
 	status: {
 		args: {},
 		call: function() {
+			let cfg = config();
 			let installed = access(BIN) ? true : false;
-			let version = installed ? trim(sh(BIN + ' -version').out) : null;
+			let stats = read_stats();
+			let now = time();
+			let sub = subnets_info();
 			return {
 				installed: installed,
-				version: version,
-				enabled: uciget('tgws.main.enabled') == '1',
+				version: installed ? daemon_version() : null,
+				enabled: cfg.enabled == '1',
 				running: sh('/etc/init.d/tgws running').code == 0,
+				// Демон отвечает, пока файл счётчиков свежий: он пишет его сразу
+				// после bind и каждые 5 секунд.
+				ready: stats != null && (now - (stats.updated ?? 0)) < STATS_FRESH,
 				// Правила перехвата реально загружены. Это отдельный факт от
 				// «служба работает»: демон мог подняться, а таблица — нет.
 				intercepting: sh('nft list table inet tgws').code == 0,
-				port: uciget('tgws.main.port') || '5454',
-				stats: read_stats()
+				port: cfg.port,
+				dc_ip: cfg.dc_ip,
+				ip_dc: cfg.ip_dc,
+				fallback_mark: cfg.fallback_mark,
+				lan_devices: cfg.lan_devices,
+				subnets: { count: sub.count, custom: sub.custom, updated: sub.updated },
+				trusttunnel: trusttunnel_present(),
+				stats: stats
 			};
 		}
 	},
@@ -59,18 +291,239 @@ return {
 		args: { action: 'restart' },
 		call: function(req) {
 			let a = req.args?.action ?? 'restart';
-			if (!(a in [ 'start', 'stop', 'restart' ]))
+			if (!(a in [ 'start', 'stop', 'restart', 'update_subnets' ]))
 				return { error: 'unsupported action' };
 			let r = sh('/etc/init.d/tgws ' + a);
 			// Код возврата `start` у procd-службы не отражает start_service():
 			// каждая проверка там пишет причину в журнал и возвращает ошибку,
 			// а сам `start` всё равно отвечает нулём. Поэтому спрашиваем procd.
-			if (a != 'stop') {
+			if (a == 'start' || a == 'restart') {
 				sh('sleep 1');
 				if (sh('/etc/init.d/tgws running').code != 0)
 					return { code: 1, output: r.out, not_running: true };
 			}
 			return { code: r.code, output: r.out };
+		}
+	},
+
+	log: {
+		args: { lines: 100 },
+		call: function(req) {
+			let n = req.args?.lines ?? 100;
+			let r = sh('logread -e tgws | tail -n ' + int(n));
+			return { lines: split(trim(r.out), '\n') };
+		}
+	},
+
+	// Версии установленного и доступного. Вызывается ОДИН раз при отрисовке
+	// страницы, а не из опроса: сетевая часть кэшируется, но даже кэшированный
+	// вызов незачем делать каждые 10 секунд.
+	versions: {
+		args: { refresh: false },
+		call: function(req) {
+			let out = { package: null, daemon: null, latest: null, update_available: false,
+			            ahead: false, checked_at: null, stale: false };
+			out.daemon = daemon_version();
+			// apk печатает "luci-app-tgws-0.1.0-r1 noarch {...} [installed]".
+			let rp = sh_out('apk list -I luci-app-tgws');
+			let mp = match(trim(rp.out), /luci-app-tgws-([^ \t\n]+)/);
+			if (mp) out.package = mp[1];
+
+			let rel = latest_release(out.package, req.args?.refresh ?? false);
+			out.latest = rel.tag;
+			out.checked_at = rel.checked_at;
+			out.stale = rel.stale;
+			if (rel.tag != null && out.package != null) {
+				let c = vercmp(rel.tag, out.package);
+				out.update_available = c > 0;
+				// Установленное новее последнего релиза — сборка из main или
+				// отставший кэш; «актуальная версия» в обоих случаях неверный
+				// ответ, поэтому признак отдаётся отдельно.
+				out.ahead = c < 0;
+			}
+			return out;
+		}
+	},
+
+	// Проверка связи с Telegram по кнопке: настоящий запрос тем же путём, что и
+	// у демона, к каждому DC из настроек.
+	probe: {
+		args: {},
+		call: function() {
+			let cfg = config();
+			if (!access(BIN))
+				return { error: 'not installed' };
+			let targets = ws_targets(cfg);
+			if (!length(targets))
+				return { error: 'no WebSocket targets configured', results: [] };
+			return { results: probe_targets(targets, false) };
+		}
+	},
+
+	// Диагностика: один вызов прогоняет цепочку от настроек до трафика и
+	// возвращает плоский список проверок. Вызывается ТОЛЬКО по кнопке: часть
+	// проверок ходит в сеть и занимает секунды, в опросе состояния им не место.
+	// Бэкенд сообщает факты, а формулировки и подсказки принадлежат интерфейсу.
+	diagnose: {
+		args: {},
+		call: function() {
+			let cfg = config();
+			let checks = [];
+			function add(group, id, status, value) {
+				push(checks, { group: group, id: id, status: status, value: value ?? '' });
+			}
+
+			let installed = access(BIN) ? true : false;
+			let enabled = cfg.enabled == '1';
+			let running = sh('/etc/init.d/tgws running').code == 0;
+			let stats = read_stats();
+			let now = time();
+
+			// --- Служба ---
+			add('service', 'binary', installed ? 'ok' : 'fail', installed ? (daemon_version() ?? '') : '');
+			add('service', 'enabled', enabled ? 'ok' : 'skip', '');
+			if (!enabled)
+				add('service', 'running', 'skip', '');
+			else
+				add('service', 'running', running ? 'ok' : 'fail', '');
+			if (enabled && running) {
+				let ready = stats != null && (now - (stats.updated ?? 0)) < STATS_FRESH;
+				add('service', 'ready', ready ? 'ok' : 'fail', '');
+			}
+
+			// --- Сеть ---
+			if (enabled && running) {
+				let table = sh('nft list table inet tgws').code == 0;
+				add('network', 'nft', table ? 'ok' : 'fail', '');
+			}
+			let lan = length(trim(cfg.lan_devices)) ? trim(cfg.lan_devices)
+				: trim(sh_out('uci -q get network.lan.device').out);
+			if (!length(lan))
+				lan = 'br-lan';
+			let missing = [];
+			let devs = [];
+			for (let d in split(lan, /[ \t]+/)) {
+				if (!length(d) || !match(d, /^[A-Za-z0-9._-]+$/))
+					continue;
+				push(devs, d);
+				if (sh('ip link show dev ' + shq(d)).code != 0)
+					push(missing, d);
+			}
+			add('network', 'lan', length(missing) ? 'fail' : 'ok', length(missing) ? join(' ', missing) : join(' ', devs));
+
+			// Зона файрвола, в которой стоит сеть lan, обязана принимать
+			// входящий трафик: иначе fw4 отклонит перенаправленные соединения.
+			if (length(trim(cfg.lan_devices))) {
+				add('network', 'zone', 'skip', '');
+			} else {
+				let fw = firewall_zones();
+				let zone = null;
+				for (let z in fw.zones)
+					if ('lan' in z.networks)
+						zone = z;
+				if (!zone)
+					add('network', 'zone', 'skip', '');
+				else {
+					let input = length(zone.input) ? zone.input : fw.default_input;
+					add('network', 'zone', input == 'ACCEPT' ? 'ok' : 'warn', zone.name + ': ' + input);
+				}
+			}
+
+			// IPv6 в локальной сети: перехватывается только IPv4, и клиент,
+			// получивший IPv6-адрес, может обойти перехват.
+			let v6 = 0;
+			if (length(devs)) {
+				let r6 = sh_out('ip -6 addr show dev ' + shq(devs[0]) + ' scope global');
+				for (let line in split(r6.out, '\n'))
+					if (match(line, /inet6 /))
+						v6++;
+			}
+			add('network', 'ipv6', v6 > 0 ? 'warn' : 'ok', v6 > 0 ? '' + v6 : '');
+
+			// --- Telegram ---
+			let targets = ws_targets(cfg);
+			if (!installed)
+				add('telegram', 'websocket', 'skip', '');
+			else if (!length(targets))
+				add('telegram', 'websocket', 'skip', 'none');
+			else {
+				for (let p in probe_targets(targets, false)) {
+					let ok = 0, ms = null, err = '';
+					for (let r in p.results) {
+						if (r.ok) {
+							ok++;
+							if (ms == null || r.ms < ms) ms = r.ms;
+						} else if (!length(err))
+							err = r.error ?? '';
+					}
+					let total = length(p.results);
+					let status = (total > 0 && ok == total) ? 'ok' : (ok > 0 ? 'warn' : 'fail');
+					add('telegram', 'websocket', status,
+						'DC' + p.dc + ' (' + p.target + '): ' + (ok > 0 ? ok + '/' + total + ', ' + ms + ' ms' : err));
+				}
+			}
+
+			// Прямой путь к Telegram: справка, а не проблема. Если он закрыт,
+			// именно ради этого пакет и нужен.
+			// Проверяется только TCP-соединение: curl идёт на порт 443 обычным
+			// HTTP, и любой ответ (в том числе обрыв или «не HTTP», коды 52 и 56)
+			// значит, что соединение установлено. Коды 7 (отказ) и 28 (таймаут)
+			// — что нет. nc -z здесь не годится: в busybox роутера такого ключа нет,
+			// и проверка всегда говорила бы «закрыт».
+			let rc = sh_out('curl -s --connect-timeout 3 -m 4 -o /dev/null http://149.154.167.51:443/').code;
+			add('telegram', 'direct', 'ok', (rc == 7 || rc == 28 || rc == 6) ? 'blocked' : 'reachable');
+
+			let sub = subnets_info();
+			let age = sub.custom && sub.updated != null ? int((now - sub.updated) / 86400) : null;
+			add('telegram', 'subnets', (age != null && age > 45) ? 'warn' : 'ok',
+				// Факт, а не фраза: формулировку и перевод даёт интерфейс.
+				sub.count + (sub.custom ? ' updated ' + age : ' builtin'));
+
+			if (stats != null) {
+				let unk = stats.unknown_dc ?? [];
+				if (length(unk))
+					add('telegram', 'unknown_dc', 'warn', join(', ', unk));
+				if ((stats.total ?? 0) >= 20 && (stats.ws ?? 0) == 0)
+					add('telegram', 'ws_unused', 'warn', '' + stats.total);
+			}
+
+			// --- Совместимость с TrustTunnel ---
+			let mark = mark_hex(cfg.fallback_mark);
+			let tt = trusttunnel_present();
+			if (tt) {
+				// Подсети Telegram в наборах TrustTunnel: перехват tgws срабатывает
+				// раньше, и такой трафик в туннель не пойдёт.
+				let n = 0;
+				for (let set in [ 'tt_static4', 'tt_bypass4' ]) {
+					let r = sh_out('nft list set inet trusttunnel ' + set);
+					for (let line in split(r.out, '\n'))
+						if (match(line, /149\.154\.|91\.108\./))
+							n++;
+				}
+				add('integration', 'tt_telegram', n > 0 ? 'warn' : 'ok', '');
+			} else
+				add('integration', 'tt_telegram', 'skip', '');
+
+			if (mark == null && length(trim(cfg.fallback_mark)))
+				add('integration', 'fallback', 'fail', cfg.fallback_mark);
+			else if (mark == null)
+				add('integration', 'fallback', 'skip', tt ? 'direct' : '');
+			else {
+				let rule = false;
+				for (let line in split(sh_out('ip rule show').out, '\n'))
+					if (index(lc(line), 'fwmark ' + mark) >= 0)
+						rule = true;
+				add('integration', 'fallback', rule ? 'ok' : 'fail', mark);
+			}
+
+			let counts = { ok: 0, warn: 0, fail: 0, skip: 0 };
+			for (let c in checks)
+				counts[c.status]++;
+			return {
+				verdict: counts.fail > 0 ? 'fail' : (counts.warn > 0 ? 'warn' : 'ok'),
+				counts: counts,
+				checks: checks
+			};
 		}
 	}
 
