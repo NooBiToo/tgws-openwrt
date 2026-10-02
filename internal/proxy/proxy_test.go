@@ -1,0 +1,342 @@
+package proxy_test
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"tgws/internal/mtproto"
+	"tgws/internal/proxy"
+	"tgws/internal/ws/wstest"
+)
+
+// fakeDC принимает соединения и сообщает первые want байт каждого.
+type fakeDC struct {
+	ln  net.Listener
+	got chan []byte
+}
+
+func newFakeDC(t *testing.T, want int) *fakeDC {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &fakeDC{ln: ln, got: make(chan []byte, 4)}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				buf := make([]byte, want)
+				if _, err := io.ReadFull(c, buf); err == nil {
+					d.got <- buf
+				}
+				io.Copy(io.Discard, c)
+			}()
+		}
+	}()
+	return d
+}
+
+type harness struct {
+	addr    string
+	dialWS  atomic.Int32
+	mu      sync.Mutex
+	domains []string
+	srv     *proxy.Server
+	now     atomic.Int64 // секунды Unix: часы читает горутина сервера, двигает тест
+}
+
+// newHarness поднимает прокси. wsSrv может быть nil (WebSocket недоступен),
+// dc — nil, если откат не ожидается.
+func newHarness(t *testing.T, dst netip.AddrPort, wsSrv *wstest.Server, dc *fakeDC) *harness {
+	t.Helper()
+	h := &harness{}
+	h.now.Store(1_000_000)
+	cfg := proxy.Config{
+		Targets: map[int]string{2: "149.154.167.220", 4: "149.154.167.220"},
+		OrigDst: func(*net.TCPConn) (netip.AddrPort, error) { return dst, nil },
+		DialWS: func(ctx context.Context, target, domain, path string) (proxy.WSConn, error) {
+			h.dialWS.Add(1)
+			h.mu.Lock()
+			h.domains = append(h.domains, domain)
+			h.mu.Unlock()
+			if wsSrv == nil {
+				return nil, errors.New("websocket unavailable")
+			}
+			c, err := wsSrv.Dialer(path).Dial(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+		DialTCP: func(ctx context.Context, addr string) (net.Conn, error) {
+			if dc == nil {
+				return nil, errors.New("no fallback expected")
+			}
+			return net.Dial("tcp", dc.ln.Addr().String())
+		},
+		Now:          func() time.Time { return time.Unix(h.now.Load(), 0) },
+		HelloTimeout: 300 * time.Millisecond,
+	}
+	h.srv = proxy.New(cfg)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go h.srv.Serve(ln)
+	h.addr = ln.Addr().String()
+	return h
+}
+
+func (h *harness) firstDomain() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.domains) == 0 {
+		return ""
+	}
+	return h.domains[0]
+}
+
+func (h *harness) dial(t *testing.T) net.Conn {
+	t.Helper()
+	c, err := net.Dial("tcp", h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+func intermediatePacket(payload []byte) []byte {
+	p := make([]byte, 4+len(payload))
+	binary.LittleEndian.PutUint32(p, uint32(len(payload)))
+	copy(p[4:], payload)
+	return p
+}
+
+func recvBytes(t *testing.T, ch <-chan []byte) []byte {
+	t.Helper()
+	select {
+	case b := <-ch:
+		return b
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for bytes")
+		return nil
+	}
+}
+
+func TestObfuscatedClientIsBridgedOverWebSocket(t *testing.T) {
+	seen := make(chan []byte, 1)
+	srv := wstest.New(t, func(p *wstest.Peer) {
+		first, err := p.ReadBinary()
+		if err != nil {
+			return
+		}
+		init, err := mtproto.ParseInit(first) // поддельный Telegram — ответчик
+		if err != nil || init.DCIdx != 2 || init.Proto != mtproto.ProtoIntermediate {
+			t.Errorf("relay init: %+v, %v", init, err)
+			return
+		}
+		pkt, _ := p.ReadBinary()
+		init.Pair.Fwd.XORKeyStream(pkt, pkt)
+		seen <- pkt
+		reply := []byte("pong-from-telegram")
+		init.Pair.Rev.XORKeyStream(reply, reply)
+		p.WriteFrame(2, true, reply)
+		p.ReadBinary() // ждём закрытия
+	})
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), srv, nil)
+	c := h.dial(t)
+
+	rawInit, cl := mtproto.NewRelayInit(mtproto.ProtoIntermediate, 2)
+	c.Write(rawInit)
+	msg := intermediatePacket([]byte("hello-telegram"))
+	enc := append([]byte(nil), msg...)
+	cl.Fwd.XORKeyStream(enc, enc)
+	c.Write(enc)
+
+	if got := recvBytes(t, seen); string(got) != string(msg) {
+		t.Fatalf("telegram saw % x, want % x", got, msg)
+	}
+	reply := make([]byte, len("pong-from-telegram"))
+	if _, err := io.ReadFull(c, reply); err != nil {
+		t.Fatal(err)
+	}
+	cl.Rev.XORKeyStream(reply, reply)
+	if string(reply) != "pong-from-telegram" {
+		t.Fatalf("client saw %q", reply)
+	}
+	if h.srv.Stats().WS.Load() != 1 {
+		t.Fatalf("WS counter = %d, want 1", h.srv.Stats().WS.Load())
+	}
+	if got := h.firstDomain(); got != "kws2.web.telegram.org" {
+		t.Fatalf("first domain = %s", got)
+	}
+}
+
+func TestMediaConnectionTriesTheAlternateDomainFirst(t *testing.T) {
+	srv := wstest.New(t, func(p *wstest.Peer) { p.ReadBinary(); p.ReadBinary() })
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), srv, nil)
+	c := h.dial(t)
+	rawInit, _ := mtproto.NewRelayInit(mtproto.ProtoAbridged, -2)
+	c.Write(rawInit)
+	deadline := time.Now().Add(2 * time.Second)
+	for h.dialWS.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := h.firstDomain(); got != "kws2-1.web.telegram.org" {
+		t.Fatalf("first domain = %q, want the alternate one for media", got)
+	}
+}
+
+func TestPlainAbridgedClientIsBridgedByIP(t *testing.T) {
+	seen := make(chan []byte, 1)
+	srv := wstest.New(t, func(p *wstest.Peer) {
+		first, _ := p.ReadBinary()
+		init, err := mtproto.ParseInit(first)
+		if err != nil || init.DCIdx != 2 || init.Proto != mtproto.ProtoAbridged {
+			t.Errorf("relay init: %+v, %v", init, err)
+			return
+		}
+		pkt, _ := p.ReadBinary()
+		init.Pair.Fwd.XORKeyStream(pkt, pkt)
+		seen <- pkt
+		p.ReadBinary()
+	})
+	// DC2 известен по адресу: клиент без обфускации DC в потоке не называет.
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), srv, nil)
+	c := h.dial(t)
+	pkt := append([]byte{2}, 1, 2, 3, 4, 5, 6, 7, 8) // abridged: 2 слова
+	c.Write(append([]byte{0xef}, pkt...))
+	if got := recvBytes(t, seen); string(got) != string(pkt) {
+		t.Fatalf("telegram saw % x, want % x", got, pkt)
+	}
+}
+
+func TestRedirectFallsBackVerbatimAndBlacklistsTheDC(t *testing.T) {
+	redirect := wstest.NewHTTP(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://example.org/")
+		w.WriteHeader(http.StatusFound)
+	})
+	rawInit, _ := mtproto.NewRelayInit(mtproto.ProtoIntermediate, 2)
+	sent := append(append([]byte(nil), rawInit...), []byte("extra")...)
+	dc := newFakeDC(t, len(sent))
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), redirect, dc)
+
+	c := h.dial(t)
+	c.Write(sent)
+	if got := recvBytes(t, dc.got); string(got) != string(sent) {
+		t.Fatal("the fallback must replay the client's bytes verbatim")
+	}
+	if n := h.dialWS.Load(); n != 2 {
+		t.Fatalf("WS attempts = %d, want 2 (both domains)", n)
+	}
+	if h.srv.Stats().Fallback.Load() != 1 {
+		t.Fatalf("fallback counter = %d", h.srv.Stats().Fallback.Load())
+	}
+
+	// Все домены ответили редиректом: DC в чёрном списке, второй клиент идёт
+	// прямо, не тратя время на заведомо безнадёжные попытки.
+	c2 := h.dial(t)
+	c2.Write(sent)
+	recvBytes(t, dc.got)
+	if n := h.dialWS.Load(); n != 2 {
+		t.Fatalf("WS attempts after the second client = %d, want still 2", n)
+	}
+}
+
+func TestTransientFailureCoolsDownThenRetries(t *testing.T) {
+	rawInit, _ := mtproto.NewRelayInit(mtproto.ProtoIntermediate, 2)
+	dc := newFakeDC(t, len(rawInit))
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), nil, dc) // WS недоступен
+
+	h.dial(t).Write(rawInit)
+	recvBytes(t, dc.got)
+	first := h.dialWS.Load()
+	if first == 0 {
+		t.Fatal("the first client must try WebSocket")
+	}
+
+	h.dial(t).Write(rawInit)
+	recvBytes(t, dc.got)
+	if h.dialWS.Load() != first {
+		t.Fatal("during the cooldown the DC must not be retried")
+	}
+
+	h.now.Add(120) // пауза в минуту истекла
+	h.dial(t).Write(rawInit)
+	recvBytes(t, dc.got)
+	if h.dialWS.Load() <= first {
+		t.Fatal("after the cooldown the DC must be tried again — a transient failure is not forever")
+	}
+}
+
+func TestUnknownPlainClientFallsBackWithoutWebSocket(t *testing.T) {
+	sent := append([]byte{0xef}, []byte("12345678")...)
+	dc := newFakeDC(t, len(sent))
+	h := newHarness(t, netip.MustParseAddrPort("1.2.3.4:443"), nil, dc)
+	h.dial(t).Write(sent)
+	if got := recvBytes(t, dc.got); string(got) != string(sent) {
+		t.Fatal("bytes must be replayed verbatim")
+	}
+	if h.dialWS.Load() != 0 {
+		t.Fatal("an address with no known DC must not open a WebSocket")
+	}
+	if u := h.srv.Stats().Snapshot().UnknownDC; len(u) != 1 || u[0] != "1.2.3.4" {
+		t.Fatalf("unknown_dc = %v", u)
+	}
+}
+
+func TestNonMTProtoTrafficIsPassedThrough(t *testing.T) {
+	req := make([]byte, 0, 80)
+	for len(req) < 80 {
+		req = append(req, "GET / HTTP/1.1\r\n"...)
+	}
+	dc := newFakeDC(t, len(req))
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:80"), nil, dc)
+	h.dial(t).Write(req)
+	if got := recvBytes(t, dc.got); string(got) != string(req) {
+		t.Fatal("non-MTProto bytes must reach the original destination intact")
+	}
+	if h.dialWS.Load() != 0 {
+		t.Fatal("HTTP must not be sent to a WebSocket")
+	}
+}
+
+func TestSilentClientIsReleased(t *testing.T) {
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), nil, nil)
+	c := h.dial(t)
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	// Клиент молчит: прокси обязан закрыть соединение по HelloTimeout, а не
+	// держать его вечно, и не открывать откат ради пустого соединения.
+	buf := make([]byte, 1)
+	if _, err := c.Read(buf); err == nil {
+		t.Fatal("expected the proxy to close the connection")
+	}
+	deadline := time.Now().Add(time.Second)
+	for h.srv.Stats().Active.Load() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if h.srv.Stats().Active.Load() != 0 {
+		t.Fatal("the connection goroutine leaked")
+	}
+	if h.srv.Stats().Fallback.Load() != 0 {
+		t.Fatal("an empty connection must not trigger a fallback")
+	}
+}
