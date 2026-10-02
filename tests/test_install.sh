@@ -41,6 +41,16 @@ assert_eq "arm" "$(suffix_for arm_arm1176jzf-s_vfp)" "armv6"
 assert_eq "DIE" "$(suffix_for mips64_octeonplus)" "mips64 is refused"
 assert_eq "DIE" "$(suffix_for riscv64_riscv64)" "riscv64 is refused"
 
+# Требуемое место считается от размера скачанного бинарника (нужны две копии:
+# старая и новая), а не берётся константой, втрое превышающей реальную нужду.
+assert_eq "0" "$(grep -c 'need_kb=[0-9]' "$F")" "free space is not a hard-coded constant"
+assert_contains "$(cat "$F")" 'wc -c < "$tmp/tgws"' "free space is derived from the downloaded binary"
+# Проверка идёт после скачивания: до него размер неизвестен.
+dl_line=$(grep -n 'curl -fsSL -o "\$tmp/tgws"' "$F" | head -n1 | cut -d: -f1)
+sp_line=$(grep -n 'wc -c < "\$tmp/tgws"' "$F" | head -n1 | cut -d: -f1)
+assert_eq "yes" "$([ -n "$dl_line" ] && [ -n "$sp_line" ] && [ "$dl_line" -lt "$sp_line" ] && echo yes || echo no)" \
+	"the space check runs after the binary is downloaded"
+
 assert_eq "1" "$(grep -c '^build arm  *GOARCH=arm GOARM=5' scripts/build.sh)" "the arm build is soft-float GOARM=5"
 assert_eq "0" "$(cat scripts/build.sh install.sh | grep -c 'tgws-linux-armv7\|build armv7')" "no stale armv7 name"
 

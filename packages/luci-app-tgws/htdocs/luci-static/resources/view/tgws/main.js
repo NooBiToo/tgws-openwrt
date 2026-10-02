@@ -108,7 +108,12 @@ return view.extend({
 			_('DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or enter none to use no WebSocket at all.'));
 		o.default = '2:149.154.167.220,4:149.154.167.220';
 		o.validate = function(section_id, value) {
-			if (value === '' || value === 'none' || /^[0-9]+:[0-9.]+(,[ ]*[0-9]+:[0-9.]+)*$/.test(value))
+			// Номер DC и адрес проверяются по смыслу, как это делает сам
+			// демон: иначе значение вроде 7:1.2.3.4 принималось бы формой,
+			// а демон отказывался бы запускаться.
+			var pair = '(1|2|3|4|5|203):((25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})';
+			if (value === '' || value === 'none' ||
+			    new RegExp('^' + pair + '(,[ ]*' + pair + ')*$').test(value))
 				return true;
 			return _('Expected pairs like 2:149.154.167.220, separated by commas, or none');
 		};

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"tgws/internal/mtproto"
@@ -19,6 +20,17 @@ type hello struct {
 	dcIdx    int16
 	hasDC    bool
 	err      error
+}
+
+var errNotMTProto = errors.New("proxy: not MTProto")
+
+// looksLikeHTTP сообщает, что четыре байта — начало метода HTTP.
+func looksLikeHTTP(b []byte) bool {
+	switch string(b) {
+	case "GET ", "POST", "HEAD", "PUT ", "DELE", "OPTI", "PATC", "CONN":
+		return true
+	}
+	return false
 }
 
 // readHello читает ровно столько, сколько нужно для определения транспорта:
@@ -45,6 +57,15 @@ func readHello(r io.Reader) hello {
 	h.consumed = buf[:1+n]
 	if err != nil {
 		h.err = err
+		return h
+	}
+	// Короткий HTTP-запрос (редирект цепляет и сайт telegram.org) не дотянет
+	// до 64 байт, а клиент ждёт ответа: читать дальше значило бы держать его
+	// до HelloTimeout. Метод узнаётся по четырём байтам, остальное остаётся в
+	// сокете для отката. Obfuscated2-заголовок так начаться может лишь с
+	// вероятностью 2^-32, и такое соединение просто уйдёт напрямую.
+	if looksLikeHTTP(buf[:4]) {
+		h.err = errNotMTProto
 		return h
 	}
 	switch binary.BigEndian.Uint32(buf[:4]) {

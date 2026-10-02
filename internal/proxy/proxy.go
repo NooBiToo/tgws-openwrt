@@ -282,8 +282,10 @@ func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitt
 	var once sync.Once
 	shutdown := func() {
 		once.Do(func() {
-			_ = w.Close()
+			// Сначала клиентский сокет: его закрытие не блокируется, а
+			// закрытие WebSocket может ждать записи.
 			_ = c.Close()
+			_ = w.Close()
 		})
 	}
 	var wg sync.WaitGroup

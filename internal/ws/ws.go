@@ -243,6 +243,10 @@ func (c *Conn) Recv() ([]byte, error) {
 func (c *Conn) Close() error {
 	var err error
 	c.once.Do(func() {
+		// Срок записи ставится ДО захвата замка: Send, упёршийся в полный
+		// буфер, держит его, и без срока кадр закрытия ждал бы таймаута TCP
+		// (около четверти часа). Срок обрывает и застрявший Send.
+		_ = c.c.SetWriteDeadline(time.Now().Add(time.Second))
 		_ = c.write(appendFrame(nil, opClose, nil))
 		err = c.c.Close()
 	})

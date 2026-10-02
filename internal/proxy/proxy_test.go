@@ -364,6 +364,23 @@ func TestUnexpectedDestinationPortIsDropped(t *testing.T) {
 	requireDropped(t, h, c)
 }
 
+// Клиент прислал часть приветствия и замолчал, ожидая ответа: это короткий
+// запрос-ответ неизвестного протокола, а не зависший клиент. Его байты
+// дословно уходят по назначению после HelloTimeout, а не теряются.
+// (Полностью молчащий клиент, без единого байта, закрывается — см. тест ниже.)
+func TestPartialHelloIsReplayedNotHeld(t *testing.T) {
+	sent := []byte("ABCDEFGHIJ") // не HTTP, не MTProto, меньше 64 байт
+	dc := newFakeDC(t, len(sent))
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), nil, dc)
+	h.dial(t).Write(sent)
+	if got := recvBytes(t, dc.got); string(got) != string(sent) {
+		t.Fatalf("destination saw %q, want %q", got, sent)
+	}
+	if h.dialWS.Load() != 0 {
+		t.Fatal("a partial hello must not open a WebSocket")
+	}
+}
+
 func TestSilentClientIsReleased(t *testing.T) {
 	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:443"), nil, nil)
 	c := h.dial(t)

@@ -58,16 +58,17 @@ i18n_url=$(pick_asset '\/luci-i18n-tgws-ru[^"\/]*\.apk')
 [ -n "$bin_url" ] || die "no tgws-linux-$suffix in the latest release of $REPO"
 [ -n "$pkg_url" ] || die "no luci-app-tgws .apk in the latest release of $REPO"
 
-# Места под бинарник должно хватать: запись в переполненный overlay обрывается
-# молча, и остаётся обрезанный файл.
-need_kb=8192
-free_kb=$(df -k /usr 2>/dev/null | awk 'NR==2 { print $4 }')
-if [ -n "$free_kb" ] && [ "$free_kb" -lt "$need_kb" ]; then
-	die "not enough free space on /usr: ${free_kb} KB, need about ${need_kb} KB"
-fi
-
 say "   $bin_url"
 curl -fsSL -o "$tmp/tgws" "$bin_url" || die "failed to download $bin_url"
+
+# Места под бинарник должно хватать: запись в переполненный overlay обрывается
+# молча, и остаётся обрезанный файл. Нужны две копии (старая рядом с новой до
+# mv) и небольшой запас; размер известен только после скачивания.
+size_kb=$(( ($(wc -c < "$tmp/tgws") + 1023) / 1024 ))
+free_kb=$(df -k /usr 2>/dev/null | awk 'NR==2 { print $4 }')
+if [ -n "$free_kb" ] && [ "$free_kb" -lt $(( size_kb * 2 + 512 )) ]; then
+	die "not enough free space on /usr: ${free_kb} KB free, need about $(( size_kb * 2 + 512 )) KB"
+fi
 say "   $pkg_url"
 curl -fsSL -o "$tmp/pkg.apk" "$pkg_url" || die "failed to download $pkg_url"
 if [ -n "$i18n_url" ]; then

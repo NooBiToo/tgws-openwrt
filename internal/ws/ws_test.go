@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"tgws/internal/ws"
 	"tgws/internal/ws/wstest"
@@ -119,6 +120,34 @@ func TestRedirectIsReportedWithLocation(t *testing.T) {
 	}
 	if !he.Redirect() || he.Status != 302 || he.Location != "https://example.org/" {
 		t.Fatalf("unexpected handshake error: %+v", he)
+	}
+}
+
+// Send, упёршийся в переполненный буфер, держит замок записи, а Close пишет
+// кадр закрытия под тем же замком: без срока записи закрытие ждало бы
+// таймаута TCP (около четверти часа), и мост не мог бы разобрать соединение.
+func TestCloseIsNotBlockedByAStuckSend(t *testing.T) {
+	release := make(chan struct{})
+	srv := wstest.New(t, func(p *wstest.Peer) { <-release }) // сервер ничего не читает
+	t.Cleanup(func() { close(release) })
+	c := dial(t, srv)
+
+	go func() {
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < 256; i++ { // 256 МиБ — больше любых буферов сокета
+			if c.Send(chunk) != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(300 * time.Millisecond) // Send упирается в полный буфер
+
+	done := make(chan struct{})
+	go func() { c.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close hung behind a blocked Send")
 	}
 }
 

@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"bytes"
+	"io"
 	"testing"
+	"time"
 
 	"tgws/internal/mtproto"
 )
@@ -48,7 +50,8 @@ func TestHelloObfuscated(t *testing.T) {
 }
 
 func TestHelloGarbageKeepsEverythingRead(t *testing.T) {
-	req := bytes.Repeat([]byte("GET / HTTP/1.1\r\n"), 5) // 80 байт
+	// Не HTTP и не тег транспорта: HTTP опознаётся раньше (см. тест ниже).
+	req := bytes.Repeat([]byte("ABCDEFGHIJKLMNOP"), 5) // 80 байт
 	h := readHello(bytes.NewReader(req))
 	if h.err == nil {
 		t.Fatal("non-MTProto input must be an error")
@@ -59,9 +62,33 @@ func TestHelloGarbageKeepsEverythingRead(t *testing.T) {
 }
 
 func TestHelloShortInputKeepsPartialBytes(t *testing.T) {
-	h := readHello(bytes.NewReader([]byte("GET /")))
-	if h.err == nil || string(h.consumed) != "GET /" {
+	h := readHello(bytes.NewReader([]byte("ABCDE")))
+	if h.err == nil || string(h.consumed) != "ABCDE" {
 		t.Fatalf("hello = %+v", h)
+	}
+}
+
+// Редирект подсетей Telegram цепляет и сайт telegram.org: короткий HTTP-запрос
+// короче 64 байт, клиент после него ждёт ответа, и чтение «ещё 60 байт»
+// держало бы его до HelloTimeout. Метод HTTP узнаётся по первым четырём байтам.
+func TestHelloRecognisesShortHTTPWithoutWaitingForMore(t *testing.T) {
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	req := []byte("GET / HTTP/1.1\r\nHost: telegram.org\r\n\r\n") // 40 байт, дальше тишина
+	go pw.Write(req)
+
+	done := make(chan hello, 1)
+	go func() { done <- readHello(pr) }()
+	select {
+	case h := <-done:
+		if h.err == nil {
+			t.Fatal("HTTP is not MTProto")
+		}
+		if !bytes.Equal(h.consumed, req[:4]) {
+			t.Fatalf("consumed = %q, want only the first 4 bytes, the rest stays in the socket", h.consumed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("readHello kept waiting for 64 bytes after a recognisable HTTP method")
 	}
 }
 

@@ -30,6 +30,7 @@ func main() {
 	statsPath := flag.String("stats", "", "файл со счётчиками в JSON (пусто — не писать)")
 	verbose := flag.Bool("v", false, "подробный журнал по каждому соединению")
 	showVersion := flag.Bool("version", false, "напечатать версию и выйти")
+	check := flag.Bool("check", false, "только проверить -dc-ip и выйти (код 0 — значение допустимо)")
 	flag.Parse()
 
 	if *showVersion {
@@ -40,6 +41,12 @@ func main() {
 	targets, err := dcmap.ParseTargets(*dcIP)
 	if err != nil {
 		log.Fatalf("tgws: %v", err)
+	}
+	// init-скрипт проверяет цели до запуска службы: недопустимое значение
+	// иначе завершало бы демон при старте, а procd перезапускал бы его
+	// каждые 5 секунд. Правило допустимости одно — здесь, а не в shell.
+	if *check {
+		return
 	}
 
 	// Метки времени не нужны: procd пишет вывод в журнал сам.
@@ -85,25 +92,30 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if *statsPath != "" {
-		go func() {
+	// Файл счётчиков служит init-скрипту признаком «демон слушает»: он пишется
+	// сразу после bind, поэтому его появление означает, что порт занят именно
+	// этим процессом, а не чужим. При остановке файл удаляется ДО закрытия
+	// порта: новый экземпляр не может занять порт раньше, и устаревший файл
+	// не сойдёт за его готовность.
+	go func() {
+		if *statsPath != "" {
 			t := time.NewTicker(5 * time.Second)
 			defer t.Stop()
+		loop:
 			for {
 				if err := srv.Stats().WriteFile(*statsPath); err != nil {
 					debugf("stats: %v", err)
 				}
 				select {
 				case <-ctx.Done():
-					return
+					break loop
 				case <-t.C:
 				}
 			}
-		}()
-	}
-
-	go func() {
-		<-ctx.Done()
+			_ = os.Remove(*statsPath)
+		} else {
+			<-ctx.Done()
+		}
 		ln.Close()
 	}()
 	if err := srv.Serve(ln); err != nil {
