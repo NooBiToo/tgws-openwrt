@@ -1,0 +1,65 @@
+#!/bin/sh
+# Печатает nft-таблицу прозрачного перехвата Telegram.
+#   gen-nft <порт> [интерфейсы LAN через пробел]
+#
+# Таблица своя (inet tgws): с таблицами других пакетов она не пересекается и
+# снимается целиком одной командой. Только IPv4 и только TCP на портах, где
+# Telegram держит соединения с дата-центрами.
+#
+# Файл собран последовательными printf, а не heredoc с подстановкой: подстановка
+# команд срезает завершающие переводы строки, и закрывающая скобка склеилась бы
+# со следующим правилом. nftables отвергает файл целиком из-за одной такой
+# скобки, а подстрочные проверки этого не видят.
+
+PORT="${1:-}"
+DEVS="${2:-br-lan}"
+
+SUBNETS="91.105.192.0/23 91.108.4.0/22 91.108.8.0/22 91.108.12.0/22
+91.108.16.0/22 91.108.20.0/22 91.108.56.0/22 149.154.160.0/20 185.76.151.0/24"
+
+die() { echo "gen-nft: $*" >&2; exit 2; }
+
+case "$PORT" in
+	''|*[!0-9]*) die "port must be a number, got '$PORT'" ;;
+esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "port out of range: $PORT"
+
+# Имена интерфейсов идут в кавычках внутрь ruleset; допускаем только то, что
+# бывает в именах устройств Linux.
+case "$DEVS" in
+	*[!A-Za-z0-9._\ -]*) die "unsupported characters in interface names: '$DEVS'" ;;
+esac
+[ -n "$(printf '%s' "$DEVS" | tr -d ' ')" ] || DEVS="br-lan"
+
+dev_set=$(printf '%s\n' "$DEVS" | tr ' ' '\n' | awk '
+	NF { items[n++] = "\"" $0 "\"" }
+	END {
+		out = ""
+		for (i = 0; i < n; i++) out = out (i ? ", " : "") items[i]
+		printf "{ %s }", out
+	}')
+
+# shellcheck disable=SC2086
+net_list=$(printf '%s\n' $SUBNETS | awk '{ out = out (NR > 1 ? ", " : "") $0 } END { printf "%s", out }')
+
+printf 'table inet tgws { }\n'
+printf 'delete table inet tgws\n'
+printf '\n'
+printf 'table inet tgws {\n'
+printf '\tset tg_v4 {\n'
+printf '\t\ttype ipv4_addr\n'
+printf '\t\tflags interval\n'
+# auto-merge: соседние /22 сливаются, иначе nftables отвергает пересекающийся
+# элемент, а файл откатывается целиком.
+printf '\t\tauto-merge\n'
+printf '\t\telements = { %s }\n' "$net_list"
+printf '\t}\n'
+printf '\n'
+# Имя цепочки не redirect: это зарезервированное слово nft, и файл отвергается
+# синтаксической ошибкой (проверено настоящим nft -c).
+printf '\tchain intercept {\n'
+printf '\t\ttype nat hook prerouting priority dstnat; policy accept;\n'
+printf '\t\tiifname != %s return\n' "$dev_set"
+printf '\t\tip daddr @tg_v4 tcp dport { 80, 443, 5222 } redirect to :%s\n' "$PORT"
+printf '\t}\n'
+printf '}\n'
