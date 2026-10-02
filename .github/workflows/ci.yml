@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+      - name: Vet
+        run: go vet ./...
+      - name: Tests
+        run: go test -race ./...
+      # Кросс-сборка под все архитектуры роутеров и контроль размера: бинарник
+      # обязан помещаться на флеш, и рост выше предела должен ломать CI, а не
+      # обнаруживаться у пользователя.
+      - name: Cross-build
+        run: sh scripts/build.sh dist
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Скрипты уезжают в .apk с режимом из индекса git; на Windows он по
+      # умолчанию 100644, и такой скрипт на роутере не запускается.
+      - name: Executable bits
+        run: |
+          need="packages/luci-app-tgws/root/etc/init.d/tgws
+          packages/luci-app-tgws/root/etc/uci-defaults/40-luci-tgws
+          packages/luci-app-tgws/root/usr/libexec/tgws/gen-nft
+          tests/run.sh
+          install.sh"
+          fail=0
+          for f in $need; do
+            mode=$(git ls-files -s -- "$f" | awk '{print $1}')
+            [ "$mode" = "100755" ] && continue
+            echo "::error file=$f::mode is $mode, expected 100755"
+            fail=1
+          done
+          exit "$fail"
+
+      - name: Shell tests
+        run: sh tests/run.sh
+
+      # Версия закреплена: каждый выпуск shellcheck добавляет проверки, и
+      # незакреплённый линтер ломает сборку сам по себе при неизменном коде.
+      - name: Shellcheck
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck:v0.11.0 -s sh \
+            install.sh tests/run.sh scripts/build.sh scripts/test.sh \
+            packages/luci-app-tgws/root/usr/libexec/tgws/gen-nft \
+            packages/luci-app-tgws/root/etc/uci-defaults/40-luci-tgws
+
+      - name: Shell syntax of the init script
+        run: sh -n packages/luci-app-tgws/root/etc/init.d/tgws
+
+      - name: JSON syntax
+        run: |
+          for f in $(find packages -name '*.json'); do
+            python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"
+          done
+
+      # Недекларированный модуль LuCI — отказ во время работы, а не разбора.
+      - name: LuCI module requires
+        run: |
+          mods="ui dom rpc uci form view poll fs network validation"
+          fail=0
+          for f in packages/luci-app-tgws/htdocs/luci-static/resources/view/tgws/*.js; do
+            for m in $mods; do
+              grep -qE "(^|[^A-Za-z0-9_.$])${m}\.[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(" "$f" || continue
+              grep -qE "^'require ${m}'" "$f" && continue
+              echo "::error file=$f::${m} is used but not declared with 'require ${m}'"
+              fail=1
+            done
+          done
+          exit "$fail"
+
+      - name: JavaScript syntax
+        run: |
+          node -e '
+            const fs = require("fs");
+            const vm = require("vm");
+            let failed = false;
+            for (const f of process.argv.slice(1)) {
+              try {
+                new vm.Script("(function(){\n" + fs.readFileSync(f, "utf8") + "\n})");
+                console.log("ok: " + f);
+              } catch (e) { failed = true; console.error(f + ": " + e.message); }
+            }
+            if (failed) process.exit(1);
+          ' packages/luci-app-tgws/htdocs/luci-static/resources/view/tgws/*.js
+
+      # Вызов функции из модуля ucode без import — ошибка времени выполнения,
+      # которую проверка синтаксиса не видит.
+      - name: ucode module imports
+        run: |
+          f=packages/luci-app-tgws/root/usr/share/rpcd/ucode/luci.tgws
+          fail=0
+          for pair in 'fs:readfile' 'fs:writefile' 'fs:popen' 'fs:access' 'fs:unlink' \
+                      'fs:stat' 'fs:mkdir' 'math:rand' 'math:srand'; do
+            mod=${pair%%:*}; fn=${pair##*:}
+            if grep -qE "(^|[^A-Za-z0-9_.])${fn}[[:space:]]*\(" "$f"; then
+              grep -qE "^import[[:space:]]*\{[^}]*\b${fn}\b[^}]*\}[[:space:]]*from[[:space:]]*'${mod}'" "$f" || {
+                echo "::error file=$f::${fn}() is used but not imported from '${mod}'"
+                fail=1
+              }
+            fi
+          done
+          exit "$fail"
+
+      - name: ucode syntax
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential cmake libjson-c-dev pkg-config
+          git clone --depth 1 -b v0.0.20250529 https://github.com/jow-/ucode /tmp/ucode
+          cmake -S /tmp/ucode -B /tmp/ucode/build -DCMAKE_BUILD_TYPE=Release \
+            -DFS_SUPPORT=ON -DMATH_SUPPORT=ON \
+            -DUBUS_SUPPORT=OFF -DUCI_SUPPORT=OFF -DRTNL_SUPPORT=OFF \
+            -DNL80211_SUPPORT=OFF -DRESOLV_SUPPORT=OFF -DLOG_SUPPORT=OFF \
+            -DDEBUG_SUPPORT=OFF
+          cmake --build /tmp/ucode/build -j"$(nproc)"
+          uc=/tmp/ucode/build/ucode
+          "$uc" -L '/tmp/ucode/build/*.so' -c \
+            packages/luci-app-tgws/root/usr/share/rpcd/ucode/luci.tgws
+          # Контроль самой проверки: компилятор, принимающий битый файл, не
+          # проверяет ничего.
+          printf 'let x = ;\n' > /tmp/broken.uc
+          if "$uc" -L '/tmp/ucode/build/*.so' -c /tmp/broken.uc 2>/dev/null; then
+            echo "::error::the syntax check accepts broken input and proves nothing"
+            exit 1
+          fi

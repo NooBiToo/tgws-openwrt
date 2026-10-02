@@ -1,0 +1,107 @@
+#!/bin/sh
+# Установщик tgws для OpenWrt 25.12+.
+#   sh -c "$(wget -O - https://raw.githubusercontent.com/NooBiToo/tgws-openwrt/main/install.sh)"
+set -e
+
+REPO="${TGWS_REPO:-NooBiToo/tgws-openwrt}"
+BIN=/usr/bin/tgws
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+[ -f /etc/openwrt_release ] || die "this script is for OpenWrt only"
+# Файл существует только на роутере, линтеру его не видно.
+# shellcheck disable=SC1091
+. /etc/openwrt_release
+
+major=$(printf '%s' "$DISTRIB_RELEASE" | cut -d. -f1)
+case "$major" in
+	[0-9]*) [ "$major" -ge 25 ] || die "OpenWrt 25.12 or newer is required (found $DISTRIB_RELEASE)" ;;
+	*)      say "warning: cannot parse release '$DISTRIB_RELEASE', continuing" ;;
+esac
+command -v apk >/dev/null 2>&1 || die "apk not found; this package targets OpenWrt 25.12+"
+
+# Архитектура выводится из DISTRIB_ARCH, а НЕ из `uname -m`: на mips ядро
+# отвечает "mips" и для big-endian, и для little-endian, а бинарнику порядок
+# байт важен. DISTRIB_ARCH различает их (mips_24kc и mipsel_24kc).
+say "== Checking architecture"
+case "$DISTRIB_ARCH" in
+	x86_64)           suffix=x86_64 ;;
+	aarch64_*)        suffix=aarch64 ;;
+	arm_cortex-a*)    suffix=armv7 ;;
+	mipsel_*)         suffix=mipsel ;;
+	mips_*)           suffix=mips ;;
+	*) die "unsupported architecture '$DISTRIB_ARCH'; supported: x86_64, aarch64, ARMv7 (cortex-a), mips, mipsel" ;;
+esac
+say "   $DISTRIB_ARCH -> tgws-linux-$suffix"
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+say "== Installing dependencies"
+apk update
+apk add curl ca-bundle firewall4
+
+say "== Fetching the latest release"
+curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" > "$tmp/release.json" \
+	|| die "cannot reach the GitHub API for $REPO"
+
+# Аргумент подставляется в sed без экранирования метасимволов: вызывать только
+# с буквальными строками, как ниже.
+pick_asset() {
+	sed -n 's/.*"browser_download_url": *"\([^"]*'"$1"'\)".*/\1/p' "$tmp/release.json" | head -n1
+}
+
+bin_url=$(pick_asset "\/tgws-linux-$suffix")
+pkg_url=$(pick_asset '\/luci-app-tgws[^"\/]*\.apk')
+i18n_url=$(pick_asset '\/luci-i18n-tgws-ru[^"\/]*\.apk')
+[ -n "$bin_url" ] || die "no tgws-linux-$suffix in the latest release of $REPO"
+[ -n "$pkg_url" ] || die "no luci-app-tgws .apk in the latest release of $REPO"
+
+# Места под бинарник должно хватать: запись в переполненный overlay обрывается
+# молча, и остаётся обрезанный файл.
+need_kb=8192
+free_kb=$(df -k /usr 2>/dev/null | awk 'NR==2 { print $4 }')
+if [ -n "$free_kb" ] && [ "$free_kb" -lt "$need_kb" ]; then
+	die "not enough free space on /usr: ${free_kb} KB, need about ${need_kb} KB"
+fi
+
+say "   $bin_url"
+curl -fsSL -o "$tmp/tgws" "$bin_url" || die "failed to download $bin_url"
+say "   $pkg_url"
+curl -fsSL -o "$tmp/pkg.apk" "$pkg_url" || die "failed to download $pkg_url"
+if [ -n "$i18n_url" ]; then
+	curl -fsSL -o "$tmp/i18n.apk" "$i18n_url" \
+		|| { rm -f "$tmp/i18n.apk"; say "warning: could not download the translation package; the interface will be English"; }
+fi
+
+was_running=0
+if [ -x /etc/init.d/tgws ]; then
+	/etc/init.d/tgws running >/dev/null 2>&1 && was_running=1
+	say "== Stopping the running service"
+	/etc/init.d/tgws stop || true
+fi
+
+say "== Installing"
+apk add --allow-untrusted "$tmp/pkg.apk"
+if [ -f "$tmp/i18n.apk" ]; then
+	apk add --allow-untrusted "$tmp/i18n.apk" \
+		|| say "warning: the translation package failed to install; the interface will be English"
+fi
+# Запись через временное имя и mv: перезапись работающего бинарника напрямую
+# падает с "text file busy".
+install -m 0755 "$tmp/tgws" "$BIN.new"
+mv "$BIN.new" "$BIN"
+[ -x "$BIN" ] || die "the daemon was not installed"
+
+say "== Restarting LuCI backend"
+/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+
+if [ "$was_running" = "1" ]; then
+	say "== Starting the service back up"
+	/etc/init.d/tgws start || say "warning: the service did not start; see 'logread -e tgws'"
+fi
+
+say ""
+say "== Done"
+say "Open LuCI: Services -> Telegram, turn it on and press Save & Apply."

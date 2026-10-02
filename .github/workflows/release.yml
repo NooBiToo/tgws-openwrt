@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+# Без права записи в contents публикация релиза падает с 403 на последнем шаге.
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.23'
+      - name: Tests
+        run: go test ./...
+      - name: Build
+        run: TGWS_VERSION="${GITHUB_REF_NAME#v}" sh scripts/build.sh dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries
+          path: dist/*
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Версия пакета обязана совпадать с тегом: иначе в релизе лежит пакет с
+      # чужим номером, и apk предложит «обновление» на ту же версию.
+      - name: Tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          pkg=$(sed -n 's/^PKG_VERSION:=//p' packages/luci-app-tgws/Makefile)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "::error::tag is $tag, but PKG_VERSION is $pkg"
+            exit 1
+          fi
+
+      - name: Prepare the artifacts directory
+        run: mkdir -p out
+
+      # FEED_DIR — весь репозиторий и АБСОЛЮТНЫЙ путь: действие подставляет его
+      # в `docker run -v`, а относительное значение docker читает как имя тома
+      # и монтирует пустоту. Нужен и .git: luci.mk берёт версию пакета перевода
+      # из `git log`.
+      - name: Build package via OpenWrt SDK Action
+        uses: openwrt/gh-action-sdk@v7
+        env:
+          ARCH: x86-64-25.12.5
+          FEEDNAME: tgws
+          FEED_DIR: ${{ github.workspace }}
+          ARTIFACTS_DIR: ${{ github.workspace }}/out
+          PACKAGES: luci-app-tgws
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          find out/bin/ -name 'luci-app-tgws*.apk' -exec cp {} dist/ \;
+          find out/bin/ -name 'luci-i18n-tgws-*.apk' -exec cp {} dist/ \;
+          ls -la dist/
+          ls dist/luci-app-tgws*.apk >/dev/null
+          ls dist/luci-i18n-tgws-*.apk >/dev/null
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package
+          path: dist/*
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-logs
+          path: out/logs/
+          if-no-files-found: ignore
+
+  publish:
+    needs: [ binaries, package ]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist/
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
