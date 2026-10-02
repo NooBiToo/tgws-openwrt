@@ -296,6 +296,46 @@ func TestTransientFailureCoolsDownThenRetries(t *testing.T) {
 	}
 }
 
+// Прямой путь у многих пользователей заблокирован, и каждая попытка стоит
+// полного таймаута. Клиент (Android) перебирает адреса по очереди и ждёт
+// каждый: на живом роутере это растягивало подключение на минуты. Если
+// прямая попытка к адресу только что провалилась, следующие соединения к нему
+// закрываются сразу, чтобы клиент переходил к следующему адресу.
+func TestFailedDirectPathIsNotRetriedImmediately(t *testing.T) {
+	h := newHarness(t, netip.MustParseAddrPort("1.2.3.4:443"), nil, nil) // DC неизвестен, откат недоступен
+	hello := append([]byte{0xef}, []byte("12345678")...)
+
+	waitDials := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for h.dialTCP.Load() < want && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := h.dialTCP.Load(); got != want {
+			t.Fatalf("direct dials = %d, want %d", got, want)
+		}
+	}
+
+	c1 := h.dial(t)
+	c1.Write(hello)
+	waitDials(1)
+
+	c2 := h.dial(t)
+	c2.Write(hello)
+	_ = c2.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := c2.Read(make([]byte, 1)); err == nil {
+		t.Fatal("expected the second connection to be closed at once")
+	}
+	if got := h.dialTCP.Load(); got != 1 {
+		t.Fatalf("a recently failed direct path was dialled again: %d dials", got)
+	}
+
+	h.now.Add(120) // пауза истекла: путь снова пробуется
+	c3 := h.dial(t)
+	c3.Write(hello)
+	waitDials(2)
+}
+
 type timeoutErr struct{}
 
 func (timeoutErr) Error() string   { return "i/o timeout" }

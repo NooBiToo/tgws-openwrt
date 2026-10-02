@@ -44,6 +44,8 @@ type Config struct {
 type Server struct {
 	cfg   Config
 	fails *failTracker
+	// direct помнит адреса, до которых прямая попытка только что не дошла.
+	direct *failTracker
 }
 
 // New подставляет значения по умолчанию.
@@ -66,7 +68,11 @@ func New(cfg Config) *Server {
 	if cfg.Stats == nil {
 		cfg.Stats = NewStats()
 	}
-	return &Server{cfg: cfg, fails: newFailTracker(cfg.Now, cfg.Cooldown)}
+	return &Server{
+		cfg:    cfg,
+		fails:  newFailTracker(cfg.Now, cfg.Cooldown),
+		direct: newFailTracker(cfg.Now, cfg.Cooldown),
+	}
 }
 
 // Stats отдаёт счётчики.
@@ -261,11 +267,23 @@ func (s *Server) connectWS(dc int, media bool, target, key, label string) WSConn
 func (s *Server) fallback(c net.Conn, consumed []byte, dst netip.AddrPort, label, why string) {
 	s.cfg.Stats.Fallback.Add(1)
 	s.cfg.Debugf("[%s] direct: %s", label, why)
+
+	// Если прямая попытка к адресу только что не дошла, повторять её на каждом
+	// соединении значит заставлять клиента ждать полный таймаут каждый раз:
+	// Android перебирает адреса по очереди, и подключение растягивалось на
+	// минуты. Клиент получает отказ сразу и идёт к следующему адресу.
+	key := dst.Addr().String()
+	if s.direct.blocked(key) {
+		s.cfg.Debugf("[%s] direct path failed recently, dropping at once", label)
+		return
+	}
 	up, err := s.cfg.DialTCP(context.Background(), dst.String())
 	if err != nil {
+		s.direct.cooldown(key)
 		s.cfg.Debugf("[%s] direct dial: %v", label, err)
 		return
 	}
+	s.direct.clear(key)
 	defer up.Close()
 	if len(consumed) > 0 {
 		if _, err := up.Write(consumed); err != nil {

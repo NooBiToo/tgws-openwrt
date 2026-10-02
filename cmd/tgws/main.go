@@ -66,7 +66,11 @@ func main() {
 				ServerName: domain,
 				Path:       path,
 				Mark:       *mark,
-				Timeout:    5 * time.Second,
+				// Короче, чем кажется нужным: на живом роутере первое
+				// соединение к IP дата-центра иногда пропадало (троттлинг), а
+				// повтор на соседний домен проходил. Чем раньше сдались, тем
+				// раньше попробовали следующий.
+				Timeout: 4 * time.Second,
 			}
 			c, err := d.Dial(ctx)
 			if err != nil {
@@ -75,7 +79,7 @@ func main() {
 			return c, nil
 		},
 		DialTCP: func(ctx context.Context, addr string) (net.Conn, error) {
-			d := net.Dialer{Timeout: 10 * time.Second, Control: sockmark.Control(*mark)}
+			d := net.Dialer{Timeout: 5 * time.Second, Control: sockmark.Control(*mark)}
 			return d.DialContext(ctx, "tcp", addr)
 		},
 		Logf:   logf,
