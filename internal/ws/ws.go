@@ -248,7 +248,14 @@ func (c *Conn) Close() error {
 		// (около четверти часа). Срок обрывает и застрявший Send.
 		_ = c.c.SetWriteDeadline(time.Now().Add(time.Second))
 		_ = c.write(appendFrame(nil, opClose, nil))
-		err = c.c.Close()
+		// tls.Conn.Close шлёт close_notify и сам ставит срок записи в 5 с: при
+		// забитом буфере Close снова ждал бы эти 5 секунд. Кадр закрытия
+		// WebSocket уже ушёл, поэтому закрываем сам TCP-сокет.
+		if nc, ok := c.c.(interface{ NetConn() net.Conn }); ok {
+			err = nc.NetConn().Close()
+		} else {
+			err = c.c.Close()
+		}
 	})
 	return err
 }
