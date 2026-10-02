@@ -1,0 +1,78 @@
+'use strict';
+
+import { popen, readfile, access } from 'fs';
+
+const BIN = '/usr/bin/tgws';
+const STATS = '/var/run/tgws.json';
+
+function sh(cmd) {
+	let p = popen(cmd + ' 2>&1');
+	if (!p)
+		return { code: -1, out: '' };
+	let out = p.read('all') ?? '';
+	let code = p.close();
+	return { code: code, out: out };
+}
+
+function shq(s) {
+	return "'" + replace('' + s, "'", "'\\''") + "'";
+}
+
+function uciget(path) {
+	return trim(sh('uci -q get ' + shq(path)).out);
+}
+
+function read_stats() {
+	let raw = readfile(STATS);
+	if (!raw)
+		return null;
+	try {
+		return json(raw);
+	} catch (e) {
+		return null;
+	}
+}
+
+return {
+	'luci.tgws': {
+
+	status: {
+		args: {},
+		call: function() {
+			let installed = access(BIN) ? true : false;
+			let version = installed ? trim(sh(BIN + ' -version').out) : null;
+			return {
+				installed: installed,
+				version: version,
+				enabled: uciget('tgws.main.enabled') == '1',
+				running: sh('/etc/init.d/tgws running').code == 0,
+				// Правила перехвата реально загружены. Это отдельный факт от
+				// «служба работает»: демон мог подняться, а таблица — нет.
+				intercepting: sh('nft list table inet tgws').code == 0,
+				port: uciget('tgws.main.port') || '5454',
+				stats: read_stats()
+			};
+		}
+	},
+
+	service: {
+		args: { action: 'restart' },
+		call: function(req) {
+			let a = req.args?.action ?? 'restart';
+			if (!(a in [ 'start', 'stop', 'restart' ]))
+				return { error: 'unsupported action' };
+			let r = sh('/etc/init.d/tgws ' + a);
+			// Код возврата `start` у procd-службы не отражает start_service():
+			// каждая проверка там пишет причину в журнал и возвращает ошибку,
+			// а сам `start` всё равно отвечает нулём. Поэтому спрашиваем procd.
+			if (a != 'stop') {
+				sh('sleep 1');
+				if (sh('/etc/init.d/tgws running').code != 0)
+					return { code: 1, output: r.out, not_running: true };
+			}
+			return { code: r.code, output: r.out };
+		}
+	}
+
+	}
+};

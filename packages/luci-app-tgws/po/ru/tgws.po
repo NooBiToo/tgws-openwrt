@@ -1,0 +1,109 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Active connections"
+msgstr "Активные соединения"
+
+msgid "Carries Telegram traffic of every device on the network over WebSocket, which often works where the direct connection is slow or blocked. Nothing needs to be set up on the devices."
+msgstr "Пропускает трафик Telegram всех устройств сети через WebSocket — часто это работает там, где прямое соединение медленное или заблокировано. На самих устройствах ничего настраивать не нужно."
+
+msgid "Check the system log: logread -e tgws"
+msgstr "Посмотрите системный журнал: logread -e tgws"
+
+msgid "Command failed"
+msgstr "Команда завершилась с ошибкой"
+
+msgid "DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or clear the field."
+msgstr "Пары DC:IP через запятую. Дата-центры, которых здесь нет, идут напрямую. Если не грузятся фото и видео, оставьте только 4:149.154.167.220 или очистите поле."
+
+msgid "Enable"
+msgstr "Включить"
+
+msgid "Expected pairs like 2:149.154.167.220, separated by commas"
+msgstr "Ожидаются пары вида 2:149.154.167.220 через запятую"
+
+msgid "LAN interfaces"
+msgstr "Интерфейсы локальной сети"
+
+msgid "Local port"
+msgstr "Локальный порт"
+
+msgid "Only IPv4 is intercepted. If the router has IPv6 enabled, Telegram may connect over IPv6 and bypass this; disabling IPv6 on the LAN makes the acceleration complete."
+msgstr "Перехватывается только IPv4. Если на роутере включён IPv6, Telegram может подключаться по IPv6 и обходить перехват; отключение IPv6 в локальной сети делает ускорение полным."
+
+msgid "Only letters, digits, dots, dashes and spaces are allowed"
+msgstr "Допустимы только буквы, цифры, точки, дефисы и пробелы"
+
+msgid "Passed through directly"
+msgstr "Пропущено напрямую"
+
+msgid "Please wait"
+msgstr "Подождите"
+
+msgid "Restart"
+msgstr "Перезапустить"
+
+msgid "Run install.sh again: it installs the daemon next to this package."
+msgstr "Запустите install.sh ещё раз: он ставит демон рядом с этим пакетом."
+
+msgid "Running…"
+msgstr "Выполняется…"
+
+msgid "Sent / received"
+msgstr "Отправлено / получено"
+
+msgid "Space-separated list whose traffic is intercepted. Empty means the device of the lan network."
+msgstr "Список через пробел, трафик которого перехватывается. Пусто — устройство сети lan."
+
+msgid "Start"
+msgstr "Запустить"
+
+msgid "Stop"
+msgstr "Остановить"
+
+msgid "Telegram"
+msgstr "Telegram"
+
+msgid "Telegram acceleration is off"
+msgstr "Ускорение Telegram выключено"
+
+msgid "Telegram addresses with no known data center"
+msgstr "Адреса Telegram, для которых не известен дата-центр"
+
+msgid "Telegram is accelerated for every device on the network"
+msgstr "Telegram ускорен для всех устройств сети"
+
+msgid "The daemon runs, but Telegram traffic is not intercepted"
+msgstr "Демон работает, но трафик Telegram не перехватывается"
+
+msgid "The firewall rules were not loaded. Telegram works as before. See logread -e tgws."
+msgstr "Правила фаервола не загружены. Telegram работает как раньше. Смотрите logread -e tgws."
+
+msgid "The port the daemon listens on. Telegram connections are redirected to it by the firewall; change it only if the port is taken."
+msgstr "Порт, на котором слушает демон. Соединения Telegram перенаправляются на него фаерволом; меняйте, только если порт занят."
+
+msgid "The service did not start. The system log says why."
+msgstr "Служба не запустилась. Причина — в системном журнале."
+
+msgid "The service is not running"
+msgstr "Служба не работает"
+
+msgid "The tgws daemon is not installed"
+msgstr "Демон tgws не установлен"
+
+msgid "Through WebSocket"
+msgstr "Через WebSocket"
+
+msgid "Turn it on below and press Save & Apply."
+msgstr "Включите ниже и нажмите «Сохранить и применить»."
+
+msgid "Version"
+msgstr "Версия"
+
+msgid "WebSocket targets"
+msgstr "Цели WebSocket"
+
+msgid "unknown"
+msgstr "неизвестно"

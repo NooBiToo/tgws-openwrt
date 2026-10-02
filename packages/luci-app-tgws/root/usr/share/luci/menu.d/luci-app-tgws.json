@@ -1,0 +1,8 @@
+{
+	"admin/services/tgws": {
+		"title": "Telegram",
+		"order": 45,
+		"action": { "type": "view", "path": "tgws/main" },
+		"depends": { "acl": [ "luci-app-tgws" ], "uci": { "tgws": true } }
+	}
+}
