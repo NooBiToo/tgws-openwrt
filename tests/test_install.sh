@@ -1,0 +1,47 @@
+#!/bin/sh
+# install.sh нельзя запустить на машине разработчика, поэтому проверяются два
+# класса дефектов, которые находит только живой роутер: вызов программы, которой
+# нет в busybox OpenWrt, и неверный порядок действий. Выбор архитектуры
+# проверяется на настоящем фрагменте скрипта, а не по подстрокам.
+. "$(dirname "$0")/lib.sh"
+
+F=install.sh
+
+# `install` не апплет busybox в стандартной сборке OpenWrt (BUSYBOX_DEFAULT_INSTALL
+# выключен). В Alpine он есть, поэтому прогон установщика в Alpine этого не ловит.
+assert_eq "0" "$(grep -cE '(^|[;&|(]|[[:space:]])install[[:space:]]+-' "$F")" \
+	"install.sh does not call install(1), which stock OpenWrt lacks"
+
+# Бинарник обязан лечь на место ДО apk add: postinst пакета запускает службу,
+# и при обратном порядке стартовал бы старый демон, который потом так и
+# остался бы работать до перезагрузки.
+bin_line=$(grep -n 'mv -f "\$BIN.new" "\$BIN"' "$F" | head -n1 | cut -d: -f1)
+apk_line=$(grep -n 'apk add --allow-untrusted "\$tmp/pkg.apk"' "$F" | head -n1 | cut -d: -f1)
+assert_eq "yes" "$([ -n "$bin_line" ] && [ -n "$apk_line" ] && [ "$bin_line" -lt "$apk_line" ] && echo yes || echo no)" \
+	"the daemon binary is replaced before the package is installed"
+
+# После обновления служба перезапускается, а не стартует: у procd одинаковая
+# командная строка означает «уже запущено», и старый код продолжил бы работать.
+assert_contains "$(cat "$F")" "/etc/init.d/tgws restart" "an update restarts the service"
+
+# Выбор архитектуры: настоящий фрагмент скрипта на реальных значениях DISTRIB_ARCH.
+sed -n '/^case "\$DISTRIB_ARCH" in/,/^esac/p' "$F" > "$TT_TEST_TMP/arch.sh"
+suffix_for() {
+	( DISTRIB_ARCH="$1"; die() { echo DIE; exit 1; }; . "$TT_TEST_TMP/arch.sh"; echo "$suffix" ) 2>/dev/null
+}
+assert_eq "x86_64"  "$(suffix_for x86_64)" "x86_64"
+assert_eq "aarch64" "$(suffix_for aarch64_cortex-a53)" "aarch64"
+assert_eq "mipsel"  "$(suffix_for mipsel_24kc)" "little-endian mips"
+assert_eq "mips"    "$(suffix_for mips_24kc)" "big-endian mips"
+# На ARM без FPU (bcm53xx, arm_cortex-a9) бинарник под VFP не запускается, а
+# procd перезапускал бы его каждые 5 секунд. Один программный (GOARM=5) на все.
+assert_eq "arm" "$(suffix_for arm_cortex-a7_neon-vfpv4)" "arm with fpu"
+assert_eq "arm" "$(suffix_for arm_cortex-a9)" "arm without fpu"
+assert_eq "arm" "$(suffix_for arm_arm1176jzf-s_vfp)" "armv6"
+assert_eq "DIE" "$(suffix_for mips64_octeonplus)" "mips64 is refused"
+assert_eq "DIE" "$(suffix_for riscv64_riscv64)" "riscv64 is refused"
+
+assert_eq "1" "$(grep -c '^build arm  *GOARCH=arm GOARM=5' scripts/build.sh)" "the arm build is soft-float GOARM=5"
+assert_eq "0" "$(cat scripts/build.sh install.sh | grep -c 'tgws-linux-armv7\|build armv7')" "no stale armv7 name"
+
+tt_test_summary

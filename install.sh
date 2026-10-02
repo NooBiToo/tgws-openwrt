@@ -28,10 +28,10 @@ say "== Checking architecture"
 case "$DISTRIB_ARCH" in
 	x86_64)           suffix=x86_64 ;;
 	aarch64_*)        suffix=aarch64 ;;
-	arm_cortex-a*)    suffix=armv7 ;;
+	arm_*)            suffix=arm ;;
 	mipsel_*)         suffix=mipsel ;;
 	mips_*)           suffix=mips ;;
-	*) die "unsupported architecture '$DISTRIB_ARCH'; supported: x86_64, aarch64, ARMv7 (cortex-a), mips, mipsel" ;;
+	*) die "unsupported architecture '$DISTRIB_ARCH'; supported: x86_64, aarch64, arm, mips, mipsel" ;;
 esac
 say "   $DISTRIB_ARCH -> tgws-linux-$suffix"
 
@@ -82,24 +82,32 @@ if [ -x /etc/init.d/tgws ]; then
 	/etc/init.d/tgws stop || true
 fi
 
-say "== Installing"
+say "== Installing the daemon"
+# Бинарник кладётся ДО пакета: postinst пакета запускает службу, и при обратном
+# порядке стартовал бы старый демон, который потом так и работал бы до
+# перезагрузки. Запись через временное имя и mv: перезапись исполняемого файла
+# напрямую падает с "text file busy". install(1) не используется: в стандартной
+# сборке busybox на OpenWrt такого апплета нет.
+if ! { cp "$tmp/tgws" "$BIN.new" && chmod 0755 "$BIN.new" && mv -f "$BIN.new" "$BIN"; }; then
+	die "cannot write $BIN"
+fi
+[ -x "$BIN" ] || die "the daemon was not installed"
+
+say "== Installing the package"
 apk add --allow-untrusted "$tmp/pkg.apk"
 if [ -f "$tmp/i18n.apk" ]; then
 	apk add --allow-untrusted "$tmp/i18n.apk" \
 		|| say "warning: the translation package failed to install; the interface will be English"
 fi
-# Запись через временное имя и mv: перезапись работающего бинарника напрямую
-# падает с "text file busy".
-install -m 0755 "$tmp/tgws" "$BIN.new"
-mv "$BIN.new" "$BIN"
-[ -x "$BIN" ] || die "the daemon was not installed"
 
 say "== Restarting LuCI backend"
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
 
 if [ "$was_running" = "1" ]; then
 	say "== Starting the service back up"
-	/etc/init.d/tgws start || say "warning: the service did not start; see 'logread -e tgws'"
+	# restart, а не start: у procd одинаковая командная строка означает
+	# «уже запущено», и демон, поднятый postinst-ом, не был бы перезапущен.
+	/etc/init.d/tgws restart || say "warning: the service did not start; see 'logread -e tgws'"
 fi
 
 say ""

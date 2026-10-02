@@ -65,21 +65,36 @@ load_nft() {
 	logger -t tgws "intercepting Telegram on :$1"
 }
 
+# Снимает таблицу перехвата. Нужна не только на остановке: когда start не
+# открыл ни одного экземпляра, procd убивает работающий, а загруженная таблица
+# осталась бы и перенаправляла Telegram всей сети в закрытый порт.
+drop_nft() {
+	"$NFT" delete table inet tgws 2>/dev/null || true
+	rm -f "$RULESET"
+}
+
 start_service() {
 	read_settings
 	[ "$ENABLED" = "1" ] || {
+		drop_nft
 		logger -t tgws "disabled in configuration, not starting"
 		return 0
 	}
 	[ -x "$BIN" ] || {
+		drop_nft
 		logger -t tgws "error: $BIN not found; run install.sh"
 		return 1
 	}
+	# LuCI удаляет опцию, когда поле очищено, а read_settings подставляет
+	# значение по умолчанию, поэтому «WebSocket не нужен вовсе» выражается
+	# явным словом none.
+	[ "$DC_IP" = "none" ] && DC_IP=""
 	# Значение идёт в аргумент демона, но проверяется всё равно: опечатка
 	# должна остановить запуск с понятной причиной, а не оставить демон
 	# с нерабочей таблицей целей.
 	case "$DC_IP" in
 		*[!0-9.:,\ ]*)
+			drop_nft
 			logger -t tgws "error: dc_ip has unsupported characters: '$DC_IP'"
 			return 1
 			;;
@@ -110,8 +125,7 @@ service_started() {
 # Таблица снимается ПЕРВОЙ, до остановки демона: иначе в промежутке
 # перенаправленные соединения упирались бы в закрытый порт.
 stop_service() {
-	"$NFT" delete table inet tgws 2>/dev/null || true
-	rm -f "$RULESET"
+	drop_nft
 	return 0
 }
 

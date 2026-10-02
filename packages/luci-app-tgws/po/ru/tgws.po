@@ -15,14 +15,14 @@ msgstr "Посмотрите системный журнал: logread -e tgws"
 msgid "Command failed"
 msgstr "Команда завершилась с ошибкой"
 
-msgid "DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or clear the field."
-msgstr "Пары DC:IP через запятую. Дата-центры, которых здесь нет, идут напрямую. Если не грузятся фото и видео, оставьте только 4:149.154.167.220 или очистите поле."
+msgid "DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or enter none to use no WebSocket at all."
+msgstr "Пары DC:IP через запятую. Дата-центры, которых здесь нет, идут напрямую. Если не грузятся фото и видео, оставьте только 4:149.154.167.220 или введите none, чтобы не использовать WebSocket вовсе."
 
 msgid "Enable"
 msgstr "Включить"
 
-msgid "Expected pairs like 2:149.154.167.220, separated by commas"
-msgstr "Ожидаются пары вида 2:149.154.167.220 через запятую"
+msgid "Expected pairs like 2:149.154.167.220, separated by commas, or none"
+msgstr "Ожидаются пары вида 2:149.154.167.220 через запятую или none"
 
 msgid "LAN interfaces"
 msgstr "Интерфейсы локальной сети"
@@ -54,8 +54,8 @@ msgstr "Выполняется…"
 msgid "Sent / received"
 msgstr "Отправлено / получено"
 
-msgid "Space-separated list whose traffic is intercepted. Empty means the device of the lan network."
-msgstr "Список через пробел, трафик которого перехватывается. Пусто — устройство сети lan."
+msgid "Space-separated list whose traffic is intercepted. Empty means the device of the lan network. Only interfaces of firewall zones that accept input to the router work: Telegram cannot connect from a zone set to reject."
+msgstr "Список через пробел, трафик которого перехватывается. Пусто — устройство сети lan. Работают только интерфейсы зон фаервола, которые принимают входящий трафик к роутеру: из зоны с запретом (reject) Telegram не подключится."
 
 msgid "Start"
 msgstr "Запустить"

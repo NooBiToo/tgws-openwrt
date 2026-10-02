@@ -75,6 +75,9 @@ reset
 start_service; rc=$?
 assert_eq "0" "$rc" "disabled: start_service succeeds"
 assert_eq "0" "$(calls | grep -c procd_open_instance)" "disabled: no instance"
+# procd убивает работающий экземпляр, когда start не открыл ни одного, а
+# загруженная таблица осталась бы и перенаправляла в закрытый порт.
+assert_contains "$(calls)" "nft delete table inet tgws" "disabled: a loaded table is removed"
 
 # --- демона нет -------------------------------------------------------------
 reset
@@ -83,6 +86,7 @@ U_ENABLED=1
 start_service; rc=$?
 assert_eq "1" "$rc" "missing binary: start_service fails"
 assert_contains "$(calls)" "run install.sh" "missing binary: says what to do"
+assert_contains "$(calls)" "nft delete table inet tgws" "missing binary: a loaded table is removed"
 BIN="$bin/tgws"
 
 # --- обычный запуск ---------------------------------------------------------
@@ -118,6 +122,15 @@ U_ENABLED=1; U_DC_IP='2:1.2.3.4;rm'
 start_service; rc=$?
 assert_eq "1" "$rc" "bad dc_ip: start_service fails"
 assert_eq "0" "$(calls | grep -c procd_open_instance)" "bad dc_ip: no instance"
+assert_contains "$(calls)" "nft delete table inet tgws" "bad dc_ip: a loaded table is removed"
+
+# LuCI удаляет опцию, когда поле очищено, а init подставляет значение по
+# умолчанию, поэтому «только прямой TCP» выражается явным словом none.
+reset
+U_ENABLED=1; U_DC_IP=none
+start_service; rc=$?
+assert_eq "0" "$rc" "dc_ip none: start_service succeeds"
+assert_contains "$(calls)" "-dc-ip  -mark 0x7467" "dc_ip none: the daemon gets an empty target list"
 
 # --- таблица грузится только когда демон слушает ----------------------------
 reset

@@ -54,6 +54,7 @@ func newFakeDC(t *testing.T, want int) *fakeDC {
 type harness struct {
 	addr    string
 	dialWS  atomic.Int32
+	dialTCP atomic.Int32
 	mu      sync.Mutex
 	domains []string
 	srv     *proxy.Server
@@ -68,7 +69,14 @@ func newHarness(t *testing.T, dst netip.AddrPort, wsSrv *wstest.Server, dc *fake
 	h.now.Store(1_000_000)
 	cfg := proxy.Config{
 		Targets: map[int]string{2: "149.154.167.220", 4: "149.154.167.220"},
-		OrigDst: func(*net.TCPConn) (netip.AddrPort, error) { return dst, nil },
+		OrigDst: func(tc *net.TCPConn) (netip.AddrPort, error) {
+			// Нулевой dst — «соединение пришло напрямую, без redirect»:
+			// SO_ORIGINAL_DST тогда возвращает собственный адрес сокета.
+			if !dst.IsValid() {
+				return tc.LocalAddr().(*net.TCPAddr).AddrPort(), nil
+			}
+			return dst, nil
+		},
 		DialWS: func(ctx context.Context, target, domain, path string) (proxy.WSConn, error) {
 			h.dialWS.Add(1)
 			h.mu.Lock()
@@ -84,6 +92,7 @@ func newHarness(t *testing.T, dst netip.AddrPort, wsSrv *wstest.Server, dc *fake
 			return c, nil
 		},
 		DialTCP: func(ctx context.Context, addr string) (net.Conn, error) {
+			h.dialTCP.Add(1)
 			if dc == nil {
 				return nil, errors.New("no fallback expected")
 			}
@@ -317,6 +326,42 @@ func TestNonMTProtoTrafficIsPassedThrough(t *testing.T) {
 	if h.dialWS.Load() != 0 {
 		t.Fatal("HTTP must not be sent to a WebSocket")
 	}
+}
+
+// requireDropped проверяет, что прокси закрыл соединение, не открыв ни
+// WebSocket, ни прямого соединения.
+func requireDropped(t *testing.T, h *harness, c net.Conn) {
+	t.Helper()
+	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
+	if _, err := c.Read(make([]byte, 1)); err == nil {
+		t.Fatal("expected the proxy to close the connection")
+	}
+	if h.dialTCP.Load() != 0 || h.dialWS.Load() != 0 {
+		t.Fatalf("a dropped connection must not dial anything: tcp=%d ws=%d", h.dialTCP.Load(), h.dialWS.Load())
+	}
+	if h.srv.Stats().Fallback.Load() != 0 {
+		t.Fatal("a dropped connection must not count as a fallback")
+	}
+}
+
+// Прямое подключение к порту демона (сканер, браузер, любопытный сосед по LAN)
+// не проходило через redirect, и исходный адрес совпадает с адресом самого
+// сокета. Откат дозвонился бы до самого себя, а каждый круг порождал бы новое
+// соединение: до исчерпания дескрипторов и остановки Telegram во всей сети.
+func TestDirectConnectionToTheListenPortIsDropped(t *testing.T) {
+	h := newHarness(t, netip.AddrPort{}, nil, nil)
+	c := h.dial(t)
+	c.Write(append([]byte{0xef}, make([]byte, 80)...))
+	requireDropped(t, h, c)
+}
+
+// Правило nft перехватывает только 80, 443 и 5222; всё остальное, что дошло до
+// демона, перехвачено не было.
+func TestUnexpectedDestinationPortIsDropped(t *testing.T) {
+	h := newHarness(t, netip.MustParseAddrPort("149.154.167.51:9999"), nil, nil)
+	c := h.dial(t)
+	c.Write(append([]byte{0xef}, make([]byte, 80)...))
+	requireDropped(t, h, c)
 }
 
 func TestSilentClientIsReleased(t *testing.T) {

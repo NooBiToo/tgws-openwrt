@@ -105,16 +105,16 @@ return view.extend({
 		o.default = '5454';
 
 		o = s.option(form.Value, 'dc_ip', _('WebSocket targets'),
-			_('DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or clear the field.'));
+			_('DC:IP pairs, comma-separated. Data centers not listed here are passed through directly. If photos and videos do not load, try leaving only 4:149.154.167.220, or enter none to use no WebSocket at all.'));
 		o.default = '2:149.154.167.220,4:149.154.167.220';
 		o.validate = function(section_id, value) {
-			if (value === '' || /^[0-9]+:[0-9.]+(,[ ]*[0-9]+:[0-9.]+)*$/.test(value))
+			if (value === '' || value === 'none' || /^[0-9]+:[0-9.]+(,[ ]*[0-9]+:[0-9.]+)*$/.test(value))
 				return true;
-			return _('Expected pairs like 2:149.154.167.220, separated by commas');
+			return _('Expected pairs like 2:149.154.167.220, separated by commas, or none');
 		};
 
 		o = s.option(form.Value, 'lan_devices', _('LAN interfaces'),
-			_('Space-separated list whose traffic is intercepted. Empty means the device of the lan network.'));
+			_('Space-separated list whose traffic is intercepted. Empty means the device of the lan network. Only interfaces of firewall zones that accept input to the router work: Telegram cannot connect from a zone set to reject.'));
 		o.placeholder = 'br-lan';
 		o.optional = true;
 		o.validate = function(section_id, value) {

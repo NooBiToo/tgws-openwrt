@@ -139,6 +139,27 @@ func (s *Server) handle(c net.Conn) {
 	}
 	label := c.RemoteAddr().String() + " -> " + dst.String()
 
+	// Соединение, которое не проходило через redirect, отвечает на
+	// SO_ORIGINAL_DST собственным адресом сокета. Откат дозвонился бы тогда до
+	// самого демона, тот принял бы это соединение и снова откатился на себя:
+	// цепочка до исчерпания дескрипторов, а вместе с ней перестаёт работать
+	// Telegram во всей сети. Достаточно одного любопытного клиента на порту.
+	if local, ok := c.LocalAddr().(*net.TCPAddr); ok {
+		lp := local.AddrPort()
+		if dst.Addr().Unmap() == lp.Addr().Unmap() && dst.Port() == lp.Port() {
+			s.cfg.Debugf("[%s] not redirected, dropping", label)
+			return
+		}
+	}
+	// Правило nft перенаправляет только эти порты; остальное дошло до демона
+	// мимо перехвата, и обслуживать это не наше дело.
+	switch dst.Port() {
+	case 80, 443, 5222:
+	default:
+		s.cfg.Debugf("[%s] unexpected destination port, dropping", label)
+		return
+	}
+
 	_ = c.SetReadDeadline(time.Now().Add(s.cfg.HelloTimeout))
 	h := readHello(c)
 	_ = c.SetReadDeadline(time.Time{})

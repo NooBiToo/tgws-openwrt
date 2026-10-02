@@ -29,7 +29,11 @@ build() {
 
 build x86_64  GOARCH=amd64
 build aarch64 GOARCH=arm64
-build armv7   GOARCH=arm GOARM=7
+# GOARM=5, а не 7: программная плавающая точка работает и на ARM без FPU
+# (bcm53xx, arm_cortex-a9 без vfp), где бинарник под VFPv3 не запускается, а
+# procd перезапускал бы его каждые 5 секунд. Шифрование AES на 32-битном ARM
+# в Go и так программное, так что потери нет.
+build arm     GOARCH=arm GOARM=5
 build mips    GOARCH=mips GOMIPS=softfloat
 build mipsel  GOARCH=mipsle GOMIPS=softfloat
 exit "$fail"
