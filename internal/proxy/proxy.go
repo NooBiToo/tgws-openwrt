@@ -168,7 +168,14 @@ func (s *Server) handle(c net.Conn) {
 			// Клиент ничего не сказал: откатываться не из-за чего.
 			return
 		}
-		s.fallback(c, h.consumed, dst, label, fmt.Sprintf("not MTProto (%v)", h.err))
+		// Первые байты нужны, чтобы понять, что за клиент пришёл: без них
+		// «не MTProto» не отличить от TLS, обфускации с secret или нового
+		// транспорта.
+		head := h.consumed
+		if len(head) > 24 {
+			head = head[:24]
+		}
+		s.fallback(c, h.consumed, dst, label, fmt.Sprintf("not MTProto (%v), first bytes % x", h.err, head))
 		return
 	}
 
@@ -230,9 +237,11 @@ func (s *Server) connectWS(dc int, media bool, target, key, label string) WSConn
 			redirects++
 			s.cfg.Debugf("[%s] %s answered %d -> %s", label, domain, he.Status, he.Location)
 		case isTimeout(err):
+			// Таймаут не прекращает перебор: на живом роутере первое
+			// TCP-соединение к IP дата-центра обрывалось (троттлинг), а
+			// повтор на соседний домен того же DC проходил. Пауза нужна,
+			// только если не удался ни один домен.
 			s.cfg.Debugf("[%s] %s timed out", label, domain)
-			s.fails.cooldown(key)
-			return nil
 		default:
 			s.cfg.Debugf("[%s] %s: %v", label, domain, err)
 		}

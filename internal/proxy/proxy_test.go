@@ -296,6 +296,65 @@ func TestTransientFailureCoolsDownThenRetries(t *testing.T) {
 	}
 }
 
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// Живая проверка на роутере: первое TCP-соединение к IP дата-центра дважды
+// подряд оборвалось по таймауту (троттлинг), а повтор на соседний домен того же
+// DC прошёл. Пауза на минуту после единственного таймаута отдавала бы такой
+// DC прямому TCP, который как раз и заблокирован.
+func TestTimeoutOnTheFirstDomainTriesTheNextOne(t *testing.T) {
+	srv := wstest.New(t, func(p *wstest.Peer) { p.ReadBinary(); p.ReadBinary() })
+	var calls atomic.Int32
+
+	cfgSrv := proxy.New(proxy.Config{
+		Targets: map[int]string{2: "149.154.167.220"},
+		OrigDst: func(*net.TCPConn) (netip.AddrPort, error) {
+			return netip.MustParseAddrPort("149.154.167.51:443"), nil
+		},
+		DialWS: func(ctx context.Context, target, domain, path string) (proxy.WSConn, error) {
+			if calls.Add(1) == 1 {
+				return nil, timeoutErr{}
+			}
+			c, err := srv.Dialer(path).Dial(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+		DialTCP:      func(context.Context, string) (net.Conn, error) { return nil, errors.New("no fallback expected") },
+		HelloTimeout: 300 * time.Millisecond,
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go cfgSrv.Serve(ln)
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	rawInit, _ := mtproto.NewRelayInit(mtproto.ProtoIntermediate, 2)
+	c.Write(rawInit)
+	deadline := time.Now().Add(2 * time.Second)
+	for cfgSrv.Stats().WS.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cfgSrv.Stats().WS.Load() != 1 || calls.Load() != 2 {
+		t.Fatalf("ws=%d dials=%d, want the second domain to succeed after one timeout",
+			cfgSrv.Stats().WS.Load(), calls.Load())
+	}
+	if cfgSrv.Stats().Fallback.Load() != 0 {
+		t.Fatal("a timeout on one domain must not send the client to the direct path")
+	}
+}
+
 func TestUnknownPlainClientFallsBackWithoutWebSocket(t *testing.T) {
 	sent := append([]byte{0xef}, []byte("12345678")...)
 	dc := newFakeDC(t, len(sent))
