@@ -49,6 +49,7 @@ config_get() {
 		dc_ip) eval "$1=\${U_DC_IP:-$4}" ;;
 		lan_devices) eval "$1=\${U_LAN:-$4}" ;;
 		fallback_mark) eval "$1=\${U_FB:-$4}" ;;
+		ip_dc) eval "$1=\${U_IPDC:-$4}" ;;
 		*) eval "$1=\"$4\"" ;;
 	esac
 }
@@ -71,7 +72,7 @@ daemon_up() { echo '{}' > "$STATS"; }
 reset() {
 	: > "$CALLS"
 	rm -f "$CALLS.ruleset" "$STATS"
-	U_ENABLED=0; U_PORT=; U_DC_IP=; U_LAN=; U_FB=
+	U_ENABLED=0; U_PORT=; U_DC_IP=; U_LAN=; U_FB=; U_IPDC=
 	NFT_RC=0; export NFT_RC
 	TGWS_CHECK_RC=0; export TGWS_CHECK_RC
 }
@@ -189,6 +190,32 @@ U_ENABLED=1; U_DC_IP=none
 start_service; rc=$?
 assert_eq "0" "$rc" "dc_ip none: start_service succeeds"
 assert_contains "$(calls)" "-dc-ip  -mark 0x7467" "dc_ip none: the daemon gets an empty target list"
+
+# Ручная привязка адресов к DC (ip_dc): Android в прямом соединении не пишет
+# настоящий индекс DC, и для нового адреса его можно привязать вручную.
+reset
+U_ENABLED=1
+start_service
+assert_eq "0" "$(calls | grep -c 'ip-dc')" "no manual address map unless configured"
+
+reset
+U_ENABLED=1; U_IPDC='149.154.167.35:2, 149.154.167.255:4'
+start_service; rc=$?
+assert_eq "0" "$rc" "ip_dc: start_service succeeds"
+assert_contains "$(calls)" "-ip-dc 149.154.167.35:2, 149.154.167.255:4" "ip_dc: passed to the daemon"
+
+reset
+U_ENABLED=1; U_IPDC='1.2.3.4:2;rm'
+start_service; rc=$?
+assert_eq "1" "$rc" "ip_dc with unsupported characters: start_service fails"
+assert_eq "0" "$(calls | grep -c procd_open_instance)" "ip_dc with unsupported characters: no instance"
+assert_contains "$(calls)" "nft delete table inet tgws" "ip_dc with unsupported characters: a loaded table is removed"
+
+reset
+U_ENABLED=1; U_IPDC='1.2.3.4:9'; TGWS_CHECK_RC=2; export TGWS_CHECK_RC
+start_service; rc=$?
+assert_eq "1" "$rc" "ip_dc the daemon rejects: start_service fails"
+assert_eq "0" "$(calls | grep -c procd_open_instance)" "ip_dc the daemon rejects: no respawn loop"
 
 # --- устаревшие счётчики -----------------------------------------------------
 # Файл прошлого экземпляра иначе сошёл бы за признак готовности нового и

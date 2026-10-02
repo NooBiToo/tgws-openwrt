@@ -31,6 +31,15 @@ if [ -r "$SUBNETS_FILE" ]; then
 	[ -n "$(printf '%s' "$custom" | tr -d ' ')" ] && SUBNETS="$custom"
 fi
 
+# Только список подсетей, без правил: так интерфейс узнаёт, какой список
+# используется (зашитый или обновлённый), не повторяя выбор в другом месте.
+if [ "$PORT" = "--subnets" ]; then
+	# Разбиение по пробелам здесь намеренное: подсети разделены пробелами.
+	# shellcheck disable=SC2086
+	printf '%s\n' $SUBNETS
+	exit 0
+fi
+
 die() { echo "gen-nft: $*" >&2; exit 2; }
 
 case "$PORT" in

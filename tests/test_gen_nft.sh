@@ -53,6 +53,14 @@ printf '<html>error</html>\n' > "$TT_TEST_TMP/garbage.txt"
 assert_contains "$(TGWS_SUBNETS="$TT_TEST_TMP/garbage.txt" sh "$GEN" 5454 br-lan)" "91.108.4.0/22" "a file with no valid subnet falls back to the built-in list"
 assert_contains "$(TGWS_SUBNETS="$TT_TEST_TMP/missing.txt" sh "$GEN" 5454 br-lan)" "91.108.4.0/22" "a missing file falls back to the built-in list"
 
+# --subnets печатает ту подсеть-за-строкой, которую gen-nft реально использует:
+# интерфейс показывает по ней, зашитый список или обновлённый.
+builtin_list="$(sh "$GEN" --subnets)"
+assert_eq "9" "$(printf '%s\n' "$builtin_list" | wc -l | tr -d ' ')" "--subnets lists the built-in subnets, one per line"
+assert_contains "$builtin_list" "149.154.160.0/20" "--subnets includes the main range"
+assert_eq "2" "$(TGWS_SUBNETS="$TT_TEST_TMP/subnets.txt" sh "$GEN" --subnets | wc -l | tr -d ' ')" "--subnets reflects an updated file"
+assert_eq "0" "$(sh "$GEN" --subnets | grep -c 'table\|redirect')" "--subnets prints no ruleset"
+
 # Порт.
 assert_exit 2 "port 0 is rejected" sh "$GEN" 0 br-lan
 assert_exit 2 "port 70000 is rejected" sh "$GEN" 70000 br-lan

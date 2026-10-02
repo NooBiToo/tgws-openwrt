@@ -15,6 +15,7 @@ import (
 
 	"tgws/internal/dcmap"
 	"tgws/internal/origdst"
+	"tgws/internal/probe"
 	"tgws/internal/proxy"
 	"tgws/internal/sockmark"
 	"tgws/internal/ws"
@@ -32,12 +33,33 @@ func main() {
 	statsPath := flag.String("stats", "", "файл со счётчиками в JSON (пусто — не писать)")
 	verbose := flag.Bool("v", false, "подробный журнал по каждому соединению")
 	showVersion := flag.Bool("version", false, "напечатать версию и выйти")
+	doProbe := flag.Bool("probe", false, "проверить путь через WebSocket до Telegram (JSON в stdout) и выйти; используется диагностикой в LuCI")
+	probeDC := flag.Int("dc", 2, "для -probe: номер дата-центра")
+	probeMedia := flag.Bool("media", false, "для -probe: media-соединение")
+	probeTarget := flag.String("target", "149.154.167.220", "для -probe: IP, на который открывать WebSocket")
 	check := flag.Bool("check", false, "только проверить -dc-ip и выйти (код 0 — значение допустимо)")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(version)
 		return
+	}
+
+	if *doProbe {
+		// Настоящий запрос к Telegram тем же путём, что и у демона. Код 0,
+		// если хотя бы один домен ответил: для работы достаточно одного.
+		res := probe.Run(context.Background(), *probeTarget, *probeDC, *probeMedia, 5*time.Second)
+		b, err := probe.Marshal(res)
+		if err != nil {
+			log.Fatalf("tgws: %v", err)
+		}
+		fmt.Println(string(b))
+		for _, r := range res {
+			if r.OK {
+				return
+			}
+		}
+		os.Exit(1)
 	}
 
 	targets, err := dcmap.ParseTargets(*dcIP)
