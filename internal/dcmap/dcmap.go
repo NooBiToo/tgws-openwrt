@@ -21,8 +21,11 @@ var byIP = map[netip.Addr]int{
 	// .41 и .50 добавлены по живой проверке (2026-10-03): Desktop называет в
 	// init DC2 при подключении к ним, а Android в прямом соединении индекс DC
 	// не заполняет и опирается только на эту таблицу.
-	netip.MustParseAddr("149.154.167.41"):  2,
-	netip.MustParseAddr("149.154.167.50"):  2,
+	netip.MustParseAddr("149.154.167.41"): 2,
+	netip.MustParseAddr("149.154.167.50"): 2,
+	// .35 привязан вручную в живой проверке: в сессии DC2 через него прошло
+	// 5,7 МБ вниз; при неверном DC сервер ответил бы ошибкой -404.
+	netip.MustParseAddr("149.154.167.35"):  2,
 	netip.MustParseAddr("149.154.175.100"): 3,
 	netip.MustParseAddr("149.154.167.91"):  4,
 	netip.MustParseAddr("149.154.171.5"):   5,
@@ -56,6 +59,33 @@ func Domains(dc int, media bool) []string {
 // только DC2 и DC4; остальные уходят прямым TCP, пока не доказано обратное.
 func DefaultTargets() map[int]string {
 	return map[int]string{2: "149.154.167.220", 4: "149.154.167.220"}
+}
+
+// ParseIPMap разбирает ручную привязку адресов к DC: "149.154.167.35:2,...".
+// Нужна для адресов, которых нет в зашитой таблице: Android в прямом
+// соединении не заполняет индекс DC, и для него DC известен только по адресу.
+func ParseIPMap(s string) (map[netip.Addr]int, error) {
+	out := map[netip.Addr]int{}
+	for _, item := range strings.Split(s, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		ip, num, ok := strings.Cut(item, ":")
+		if !ok {
+			return nil, fmt.Errorf("ip-dc %q: expected IP:DC", item)
+		}
+		addr, err := netip.ParseAddr(strings.TrimSpace(ip))
+		if err != nil || !addr.Is4() {
+			return nil, fmt.Errorf("ip-dc %q: not an IPv4 address", item)
+		}
+		dc, err := strconv.Atoi(strings.TrimSpace(num))
+		if err != nil || !Valid(dc) {
+			return nil, fmt.Errorf("ip-dc %q: unknown DC", item)
+		}
+		out[addr] = dc
+	}
+	return out, nil
 }
 
 // ParseTargets разбирает "2:149.154.167.220,4:149.154.167.220".

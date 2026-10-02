@@ -26,6 +26,7 @@ var version = "dev"
 func main() {
 	listen := flag.String("listen", ":5454", "адрес, на котором принимать перенаправленные соединения")
 	dcIP := flag.String("dc-ip", "2:149.154.167.220,4:149.154.167.220", "DC:IP, на которые открывать WebSocket (пусто — только прямой TCP)")
+	ipDC := flag.String("ip-dc", "", "ручная привязка адресов к DC: IP:DC через запятую (поверх зашитой таблицы)")
 	mark := flag.Int("mark", 0x7467, "SO_MARK исходящих сокетов (0 — без метки)")
 	statsPath := flag.String("stats", "", "файл со счётчиками в JSON (пусто — не писать)")
 	verbose := flag.Bool("v", false, "подробный журнал по каждому соединению")
@@ -39,6 +40,10 @@ func main() {
 	}
 
 	targets, err := dcmap.ParseTargets(*dcIP)
+	if err != nil {
+		log.Fatalf("tgws: %v", err)
+	}
+	extraDC, err := dcmap.ParseIPMap(*ipDC)
 	if err != nil {
 		log.Fatalf("tgws: %v", err)
 	}
@@ -59,6 +64,7 @@ func main() {
 
 	cfg := proxy.Config{
 		Targets: targets,
+		ExtraDC: extraDC,
 		OrigDst: origdst.Get,
 		DialWS: func(ctx context.Context, target, domain, path string) (proxy.WSConn, error) {
 			d := ws.Dialer{

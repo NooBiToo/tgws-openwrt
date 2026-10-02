@@ -402,6 +402,62 @@ func TestPauseIsIgnoredWhenTheDirectPathIsDown(t *testing.T) {
 	waitFor("the second connection to use WebSocket despite the pause", func() bool { return s.Stats().WS.Load() == 1 })
 }
 
+// Адрес, которого нет в зашитой таблице, можно привязать к DC вручную: Android
+// в прямом соединении индекс DC не пишет, и без привязки его соединения к
+// новым адресам уходят в заблокированный прямой путь.
+func TestExtraDCMapServesAnUnknownAddress(t *testing.T) {
+	seen := make(chan []byte, 1)
+	srv := wstest.New(t, func(p *wstest.Peer) {
+		first, _ := p.ReadBinary()
+		init, err := mtproto.ParseInit(first)
+		if err != nil || init.DCIdx != 2 {
+			t.Errorf("relay init: %+v, %v", init, err)
+			return
+		}
+		pkt, _ := p.ReadBinary()
+		init.Pair.Fwd.XORKeyStream(pkt, pkt)
+		seen <- pkt
+		p.ReadBinary()
+	})
+	ip := netip.MustParseAddr("1.2.3.4")
+	s := proxy.New(proxy.Config{
+		Targets: map[int]string{2: "149.154.167.220"},
+		ExtraDC: map[netip.Addr]int{ip: 2},
+		OrigDst: func(*net.TCPConn) (netip.AddrPort, error) { return netip.AddrPortFrom(ip, 443), nil },
+		DialWS: func(ctx context.Context, target, domain, path string) (proxy.WSConn, error) {
+			c, err := srv.Dialer(path).Dial(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+		DialTCP:      func(context.Context, string) (net.Conn, error) { return nil, errors.New("no fallback expected") },
+		HelloTimeout: 300 * time.Millisecond,
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go s.Serve(ln)
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	// Как у Android: обфусцированный init с ЧУЖИМ индексом DC (здесь 4735).
+	rawInit, cl := mtproto.NewRelayInit(mtproto.ProtoAbridged, 4735)
+	c.Write(rawInit)
+	pkt := append([]byte{2}, 1, 2, 3, 4, 5, 6, 7, 8)
+	enc := append([]byte(nil), pkt...)
+	cl.Fwd.XORKeyStream(enc, enc)
+	c.Write(enc)
+	if got := recvBytes(t, seen); string(got) != string(pkt) {
+		t.Fatalf("telegram saw % x, want % x", got, pkt)
+	}
+}
+
 type timeoutErr struct{}
 
 func (timeoutErr) Error() string   { return "i/o timeout" }

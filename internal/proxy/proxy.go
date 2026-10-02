@@ -29,7 +29,8 @@ type WSConn interface {
 
 // Config собирает зависимости; всё внешнее (сеть, адреса, часы) подменяемо.
 type Config struct {
-	Targets      map[int]string // DC → IP для WebSocket
+	Targets      map[int]string     // DC → IP для WebSocket
+	ExtraDC      map[netip.Addr]int // ручная привязка адресов к DC поверх зашитой таблицы
 	OrigDst      func(*net.TCPConn) (netip.AddrPort, error)
 	DialWS       func(ctx context.Context, target, domain, path string) (WSConn, error)
 	DialTCP      func(ctx context.Context, addr string) (net.Conn, error)
@@ -105,7 +106,12 @@ func failKey(dc int, media bool) string {
 
 // pickDC предпочитает DC из init клиента; открытому клиенту DC подсказывает
 // только адрес назначения.
-func pickDC(h hello, ip netip.Addr) (dc int, media, ok bool) {
+func (s *Server) pickDC(h hello, ip netip.Addr) (dc int, media, ok bool) {
+	// Ручная привязка сильнее всего остального: так её и задают, когда
+	// остальное не дало ответа (Android пишет в init мусорный индекс).
+	if d, found := s.cfg.ExtraDC[ip]; found {
+		return d, false, true
+	}
 	if h.hasDC {
 		dc = int(h.dcIdx)
 		if dc < 0 {
@@ -186,7 +192,7 @@ func (s *Server) handle(c net.Conn) {
 		return
 	}
 
-	dc, media, ok := pickDC(h, dst.Addr())
+	dc, media, ok := s.pickDC(h, dst.Addr())
 	if !ok {
 		if st.NoteUnknown(dst.Addr().String()) {
 			s.cfg.Logf("no DC known for %s (transport %#x, obfuscated=%v, dc index in init=%d, %d bytes read): extend dcmap if clients keep using it",

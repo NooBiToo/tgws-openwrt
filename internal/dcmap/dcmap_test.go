@@ -14,8 +14,12 @@ func TestByIP(t *testing.T) {
 		// индекс DC, подключался к ним с dc=2 и работал. Android же индекс в
 		// прямом соединении не заполняет (там мусор), и DC для него берётся
 		// только отсюда.
-		"149.154.167.41":  2,
-		"149.154.167.50":  2,
+		"149.154.167.41": 2,
+		"149.154.167.50": 2,
+		// Привязан вручную (-ip-dc) в живой проверке: через него в сессии DC2
+		// прошло 5,7 МБ вниз за 33 с; при неверном DC сервер ответил бы
+		// ошибкой -404 на несколько байт.
+		"149.154.167.35":  2,
 		"149.154.175.100": 3,
 		"149.154.167.91":  4,
 		"149.154.171.5":   5,
@@ -74,6 +78,28 @@ func TestParseTargets(t *testing.T) {
 	for _, bad := range []string{"2", "x:1.2.3.4", "9:1.2.3.4", "2:not-an-ip", "2:::1"} {
 		if _, err := ParseTargets(bad); err == nil {
 			t.Errorf("ParseTargets(%q) must fail", bad)
+		}
+	}
+}
+
+func TestParseIPMap(t *testing.T) {
+	got, err := ParseIPMap("149.154.167.35:2, 149.154.167.255:4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[netip.Addr]int{
+		netip.MustParseAddr("149.154.167.35"):  2,
+		netip.MustParseAddr("149.154.167.255"): 4,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v", got)
+	}
+	if m, err := ParseIPMap(""); err != nil || len(m) != 0 {
+		t.Errorf("empty input: %v, %v", m, err)
+	}
+	for _, bad := range []string{"1.2.3.4", "1.2.3.4:9", "x:2", "1.2.3.4:x", "::1:2", "1.2.3.4:2;rm"} {
+		if _, err := ParseIPMap(bad); err == nil {
+			t.Errorf("ParseIPMap(%q) must fail", bad)
 		}
 	}
 }
