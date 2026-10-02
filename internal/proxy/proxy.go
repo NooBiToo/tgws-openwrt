@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"tgws/internal/dcmap"
@@ -201,8 +202,15 @@ func (s *Server) handle(c net.Conn) {
 		return
 	}
 	if s.fails.blocked(key) {
-		s.fallback(c, h.consumed, dst, label, fmt.Sprintf("DC%d WebSocket is paused", dc))
-		return
+		// Пауза отдаёт DC прямому пути, поэтому имеет смысл, только пока он
+		// работает. Там, где он заблокирован, пауза лишь ломала соединения:
+		// загрузка видео открывает несколько параллельных соединений, и все
+		// они, пока длилась пауза, уходили в заведомо мёртвый путь.
+		if !s.direct.blocked(dst.Addr().String()) {
+			s.fallback(c, h.consumed, dst, label, fmt.Sprintf("DC%d WebSocket is paused", dc))
+			return
+		}
+		s.cfg.Debugf("[%s] DC%d is paused, but the direct path is down: trying WebSocket anyway", label, dc)
 	}
 	conn := s.connectWS(dc, media, target, key, label)
 	if conn == nil {
@@ -222,7 +230,12 @@ func (s *Server) handle(c net.Conn) {
 	}
 	st.WS.Add(1)
 	s.cfg.Debugf("[%s] DC%d media=%v via WebSocket", label, dc, media)
-	bridge(c, conn, h.pair, relay, mtproto.NewSplitter(relayInit, h.proto), st)
+	started := time.Now()
+	end := bridge(c, conn, h.pair, relay, mtproto.NewSplitter(relayInit, h.proto), st)
+	// Конец сессии нужен, чтобы отличить зависание от обрыва: без него в
+	// журнале видно только начало.
+	s.cfg.Debugf("[%s] DC%d session closed by %s (%v): up %d B, down %d B, %.1fs",
+		label, dc, end.by, end.err, end.up, end.down, time.Since(started).Seconds())
 }
 
 // connectWS перебирает домены DC. Решение об отказе принимает здесь же:
@@ -306,7 +319,15 @@ func (s *Server) fallback(c net.Conn, consumed []byte, dst netip.AddrPort, label
 
 // bridge связывает клиента и WebSocket, перешифровывая поток в обе стороны:
 // клиентский шифр снимается, шифр стороны Telegram накладывается.
-func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitter, st *Stats) {
+func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitter, st *Stats) sessionEnd {
+	var up, down atomic.Int64
+	var first sync.Once
+	var end sessionEnd
+	// Кто завершил сессию первым и по какой причине: вторая сторона уже
+	// рвётся из-за закрытия и сама по себе ничего не говорит.
+	finish := func(by string, err error) {
+		first.Do(func() { end.by, end.err = by, err })
+	}
 	var once sync.Once
 	shutdown := func() {
 		once.Do(func() {
@@ -330,13 +351,16 @@ func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitt
 				client.Fwd.XORKeyStream(b, b)
 				relay.Fwd.XORKeyStream(b, b)
 				st.BytesUp.Add(int64(n))
+				up.Add(int64(n))
 				if parts := sp.Split(b); len(parts) > 0 {
-					if w.Send(parts...) != nil {
+					if serr := w.Send(parts...); serr != nil {
+						finish("upstream write", serr)
 						return
 					}
 				}
 			}
 			if err != nil {
+				finish("client", err)
 				if tail := sp.Flush(); len(tail) > 0 {
 					_ = w.Send(tail)
 				}
@@ -351,15 +375,27 @@ func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitt
 		for {
 			msg, err := w.Recv()
 			if err != nil {
+				finish("upstream", err)
 				return
 			}
 			relay.Rev.XORKeyStream(msg, msg)
 			client.Rev.XORKeyStream(msg, msg)
 			st.BytesDown.Add(int64(len(msg)))
+			down.Add(int64(len(msg)))
 			if _, err := c.Write(msg); err != nil {
+				finish("client write", err)
 				return
 			}
 		}
 	}()
 	wg.Wait()
+	end.up, end.down = up.Load(), down.Load()
+	return end
+}
+
+// sessionEnd описывает, как закончилась сессия через WebSocket.
+type sessionEnd struct {
+	by       string // кто завершил первым
+	err      error
+	up, down int64
 }

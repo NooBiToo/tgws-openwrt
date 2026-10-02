@@ -336,6 +336,72 @@ func TestFailedDirectPathIsNotRetriedImmediately(t *testing.T) {
 	waitDials(2)
 }
 
+// Живая проверка: загрузка видео открывает несколько параллельных соединений,
+// после неудачного открытия WebSocket DC вставал на паузу, и все остальные
+// соединения уходили в прямой путь, который на этой сети заблокирован, —
+// загрузка зависала. Пауза нужна, только когда прямой путь работает.
+func TestPauseIsIgnoredWhenTheDirectPathIsDown(t *testing.T) {
+	srv := wstest.New(t, func(p *wstest.Peer) { p.ReadBinary(); p.ReadBinary() })
+	var wsUp atomic.Bool // сначала WebSocket недоступен
+	var dials atomic.Int32
+	s := proxy.New(proxy.Config{
+		Targets: map[int]string{2: "149.154.167.220"},
+		OrigDst: func(*net.TCPConn) (netip.AddrPort, error) {
+			return netip.MustParseAddrPort("149.154.167.51:443"), nil
+		},
+		DialWS: func(ctx context.Context, target, domain, path string) (proxy.WSConn, error) {
+			dials.Add(1)
+			if !wsUp.Load() {
+				return nil, errors.New("websocket unavailable")
+			}
+			c, err := srv.Dialer(path).Dial(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		},
+		DialTCP:      func(context.Context, string) (net.Conn, error) { return nil, errors.New("direct path is blocked") },
+		HelloTimeout: 300 * time.Millisecond,
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go s.Serve(ln)
+
+	rawInit, _ := mtproto.NewRelayInit(mtproto.ProtoIntermediate, 2)
+	connect := func() net.Conn {
+		c, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { c.Close() })
+		c.Write(rawInit)
+		return c
+	}
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for !cond() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !cond() {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+
+	// Первое соединение: WebSocket не открылся (пауза DC) и прямой путь тоже.
+	connect()
+	waitFor("the first connection to fail on both paths", func() bool { return s.Stats().Fallback.Load() == 1 })
+
+	// WebSocket снова доступен, но DC ещё на паузе. Прямой путь заведомо
+	// мёртв, поэтому пауза не должна отнимать у второго соединения WebSocket.
+	wsUp.Store(true)
+	connect()
+	waitFor("the second connection to use WebSocket despite the pause", func() bool { return s.Stats().WS.Load() == 1 })
+}
+
 type timeoutErr struct{}
 
 func (timeoutErr) Error() string   { return "i/o timeout" }
