@@ -48,6 +48,7 @@ config_get() {
 		port) eval "$1=\${U_PORT:-$4}" ;;
 		dc_ip) eval "$1=\${U_DC_IP:-$4}" ;;
 		lan_devices) eval "$1=\${U_LAN:-$4}" ;;
+		fallback_mark) eval "$1=\${U_FB:-$4}" ;;
 		*) eval "$1=\"$4\"" ;;
 	esac
 }
@@ -70,7 +71,7 @@ daemon_up() { echo '{}' > "$STATS"; }
 reset() {
 	: > "$CALLS"
 	rm -f "$CALLS.ruleset" "$STATS"
-	U_ENABLED=0; U_PORT=; U_DC_IP=; U_LAN=
+	U_ENABLED=0; U_PORT=; U_DC_IP=; U_LAN=; U_FB=
 	NFT_RC=0; export NFT_RC
 	TGWS_CHECK_RC=0; export TGWS_CHECK_RC
 }
@@ -106,6 +107,36 @@ assert_contains "$(calls)" "-dc-ip 2:149.154.167.220,4:149.154.167.220" "enabled
 assert_contains "$(calls)" "-mark 0x7467" "enabled: socket mark"
 assert_contains "$(calls)" "-stats $STATS" "enabled: stats file"
 assert_eq "0" "$(calls | grep -c '^nft ')" "enabled: nft is NOT loaded before the daemon listens"
+assert_eq "0" "$(calls | grep -c 'fallback-mark')" "enabled: no fallback mark unless configured"
+
+# Соединения, которые нельзя провести через WebSocket, можно направить через
+# туннель: метка туннеля TrustTunnel (0x9527) отправляет их по его таблице.
+# По умолчанию опция выключена, и без TrustTunnel ничего не меняется.
+reset
+U_ENABLED=1; U_FB=0x9527
+start_service; rc=$?
+assert_eq "0" "$rc" "fallback mark: start_service succeeds"
+assert_contains "$(calls)" "-fallback-mark 0x9527" "fallback mark: passed to the daemon"
+
+reset
+U_ENABLED=1; U_FB=0
+start_service
+assert_eq "0" "$(calls | grep -c 'fallback-mark')" "fallback mark 0 means off"
+
+reset
+U_ENABLED=1; U_FB='0x9527;rm'
+start_service; rc=$?
+assert_eq "1" "$rc" "fallback mark with unsupported characters: start_service fails"
+assert_eq "0" "$(calls | grep -c procd_open_instance)" "fallback mark with unsupported characters: no instance"
+assert_contains "$(calls)" "nft delete table inet tgws" "fallback mark with unsupported characters: a loaded table is removed"
+
+# Значение, которое демон не разберёт, иначе завершало бы его при старте, а
+# procd перезапускал бы его каждые 5 секунд.
+reset
+U_ENABLED=1; U_FB=0xZZ; TGWS_CHECK_RC=2; export TGWS_CHECK_RC
+start_service; rc=$?
+assert_eq "1" "$rc" "fallback mark the daemon rejects: start_service fails"
+assert_eq "0" "$(calls | grep -c procd_open_instance)" "fallback mark the daemon rejects: no respawn loop"
 
 # --- свой порт и недопустимые значения -------------------------------------
 reset

@@ -27,6 +27,7 @@ func main() {
 	listen := flag.String("listen", ":5454", "адрес, на котором принимать перенаправленные соединения")
 	dcIP := flag.String("dc-ip", "2:149.154.167.220,4:149.154.167.220", "DC:IP, на которые открывать WebSocket (пусто — только прямой TCP)")
 	ipDC := flag.String("ip-dc", "", "ручная привязка адресов к DC: IP:DC через запятую (поверх зашитой таблицы)")
+	fallbackMark := flag.Int("fallback-mark", 0, "SO_MARK соединений, которые не удалось провести через WebSocket (0 — как -mark); например метка туннеля TrustTunnel 0x9527")
 	mark := flag.Int("mark", 0x7467, "SO_MARK исходящих сокетов (0 — без метки)")
 	statsPath := flag.String("stats", "", "файл со счётчиками в JSON (пусто — не писать)")
 	verbose := flag.Bool("v", false, "подробный журнал по каждому соединению")
@@ -85,7 +86,15 @@ func main() {
 			return c, nil
 		},
 		DialTCP: func(ctx context.Context, addr string) (net.Conn, error) {
-			d := net.Dialer{Timeout: 5 * time.Second, Control: sockmark.Control(*mark)}
+			// Прямое соединение несёт свою метку: по умолчанию ту же, что и
+			// WebSocket (мимо туннеля), а с -fallback-mark — метку туннеля,
+			// и тогда всё, что нельзя провести через WebSocket (веб, DC без
+			// цели), уходит через него, как это было до tgws.
+			fb := *fallbackMark
+			if fb == 0 {
+				fb = *mark
+			}
+			d := net.Dialer{Timeout: 5 * time.Second, Control: sockmark.Control(fb)}
 			return d.DialContext(ctx, "tcp", addr)
 		},
 		Logf:   logf,

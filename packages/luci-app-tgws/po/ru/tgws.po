@@ -21,6 +21,15 @@ msgstr "Пары DC:IP через запятую. Дата-центры, кот�
 msgid "Enable"
 msgstr "Включить"
 
+msgid "Expected a number like 0x9527"
+msgstr "Ожидается число вида 0x9527"
+
+msgid "Mark for traffic that cannot use WebSocket"
+msgstr "Метка для трафика, который нельзя провести через WebSocket"
+
+msgid "Telegram traffic that cannot go over WebSocket (websites, data centers without a WebSocket endpoint) is sent directly by default. To send it through the TrustTunnel tunnel instead, enter the tunnel mark, 0x9527 by default. Empty means direct."
+msgstr "Трафик Telegram, который нельзя провести через WebSocket (сайты, дата-центры без цели WebSocket), по умолчанию идёт напрямую. Чтобы направить его через туннель TrustTunnel, введите метку туннеля, по умолчанию 0x9527. Пусто — напрямую."
+
 msgid "Expected pairs like 2:149.154.167.220, separated by commas, or none"
 msgstr "Ожидаются пары вида 2:149.154.167.220 через запятую или none"
 

@@ -128,6 +128,16 @@ return view.extend({
 			return _('Only letters, digits, dots, dashes and spaces are allowed');
 		};
 
+		o = s.option(form.Value, 'fallback_mark', _('Mark for traffic that cannot use WebSocket'),
+			_('Telegram traffic that cannot go over WebSocket (websites, data centers without a WebSocket endpoint) is sent directly by default. To send it through the TrustTunnel tunnel instead, enter the tunnel mark, 0x9527 by default. Empty means direct.'));
+		o.placeholder = '0x9527';
+		o.optional = true;
+		o.validate = function(section_id, value) {
+			if (value === '' || /^(0[xX][0-9a-fA-F]{1,8}|[0-9]{1,10})$/.test(value))
+				return true;
+			return _('Expected a number like 0x9527');
+		};
+
 		return m.render().then(function(formNode) {
 			return E('div', {}, [
 				E('h2', {}, _('Telegram')),
