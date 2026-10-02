@@ -40,6 +40,10 @@ type Config struct {
 	Now          func() time.Time
 	HelloTimeout time.Duration
 	Cooldown     time.Duration
+	// DiscoverWait — сколько ждать первый пакет клиента при определении DC
+	// перебором; ReplyWait — сколько ждать ответ DC-кандидата.
+	DiscoverWait time.Duration
+	ReplyWait    time.Duration
 }
 
 // Server обслуживает перехваченные соединения.
@@ -48,6 +52,9 @@ type Server struct {
 	fails *failTracker
 	// direct помнит адреса, до которых прямая попытка только что не дошла.
 	direct *failTracker
+	// learned — адреса, чей DC определён перебором (см. discover.go).
+	learnedMu sync.Mutex
+	learned   map[netip.Addr]int
 }
 
 // New подставляет значения по умолчанию.
@@ -61,6 +68,12 @@ func New(cfg Config) *Server {
 	if cfg.Cooldown == 0 {
 		cfg.Cooldown = time.Minute
 	}
+	if cfg.DiscoverWait == 0 {
+		cfg.DiscoverWait = 2 * time.Second
+	}
+	if cfg.ReplyWait == 0 {
+		cfg.ReplyWait = 3 * time.Second
+	}
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...any) {}
 	}
@@ -71,9 +84,10 @@ func New(cfg Config) *Server {
 		cfg.Stats = NewStats()
 	}
 	return &Server{
-		cfg:    cfg,
-		fails:  newFailTracker(cfg.Now, cfg.Cooldown),
-		direct: newFailTracker(cfg.Now, cfg.Cooldown),
+		cfg:     cfg,
+		fails:   newFailTracker(cfg.Now, cfg.Cooldown),
+		direct:  newFailTracker(cfg.Now, cfg.Cooldown),
+		learned: map[netip.Addr]int{},
 	}
 }
 
@@ -122,7 +136,12 @@ func (s *Server) pickDC(h hello, ip netip.Addr) (dc int, media, ok bool) {
 		}
 		// Тестовые DC (10000+) и прочее нестандартное — не наше дело.
 	}
-	dc, ok = dcmap.ByIP(ip)
+	if dc, ok = dcmap.ByIP(ip); ok {
+		return dc, false, true
+	}
+	// Выученное перебором — последним: индекс из init клиента и зашитая
+	// таблица надёжнее, чем вывод по ответам DC.
+	dc, ok = s.learnedDC(ip)
 	return dc, false, ok
 }
 
@@ -194,6 +213,20 @@ func (s *Server) handle(c net.Conn) {
 
 	dc, media, ok := s.pickDC(h, dst.Addr())
 	if !ok {
+		// DC неизвестен: пробуем определить перебором по ответам DC. Всё, что
+		// клиент успел прислать сверх приветствия, нужно сохранить для отката.
+		d, extra := s.discover(c, h, dst, label)
+		if d != nil {
+			st.WS.Add(1)
+			st.BytesUp.Add(int64(len(extra)))
+			s.cfg.Debugf("[%s] DC%d (discovered) via WebSocket", label, d.dc)
+			started := time.Now()
+			end := bridge(c, d.conn, h.pair, d.relay, d.sp, st, d.reply)
+			s.cfg.Debugf("[%s] DC%d session closed by %s (%v): up %d B, down %d B, %.1fs",
+				label, d.dc, end.by, end.err, end.up, end.down, time.Since(started).Seconds())
+			return
+		}
+		h.consumed = append(append([]byte(nil), h.consumed...), extra...)
 		if st.NoteUnknown(dst.Addr().String()) {
 			s.cfg.Logf("no DC known for %s (transport %#x, obfuscated=%v, dc index in init=%d, %d bytes read): extend dcmap if clients keep using it",
 				dst.Addr(), uint32(h.proto), h.hasDC, h.dcIdx, len(h.consumed))
@@ -237,7 +270,7 @@ func (s *Server) handle(c net.Conn) {
 	st.WS.Add(1)
 	s.cfg.Debugf("[%s] DC%d media=%v via WebSocket", label, dc, media)
 	started := time.Now()
-	end := bridge(c, conn, h.pair, relay, mtproto.NewSplitter(relayInit, h.proto), st)
+	end := bridge(c, conn, h.pair, relay, mtproto.NewSplitter(relayInit, h.proto), st, nil)
 	// Конец сессии нужен, чтобы отличить зависание от обрыва: без него в
 	// журнале видно только начало.
 	s.cfg.Debugf("[%s] DC%d session closed by %s (%v): up %d B, down %d B, %.1fs",
@@ -325,7 +358,10 @@ func (s *Server) fallback(c net.Conn, consumed []byte, dst netip.AddrPort, label
 
 // bridge связывает клиента и WebSocket, перешифровывая поток в обе стороны:
 // клиентский шифр снимается, шифр стороны Telegram накладывается.
-func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitter, st *Stats) sessionEnd {
+//
+// initial — первый ответ DC, уже прочитанный при определении DC перебором и
+// расшифрованный потоком Telegram; клиенту он уходит первым.
+func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitter, st *Stats, initial []byte) sessionEnd {
 	var up, down atomic.Int64
 	var first sync.Once
 	var end sessionEnd
@@ -378,6 +414,15 @@ func bridge(c net.Conn, w WSConn, client, relay mtproto.Pair, sp *mtproto.Splitt
 	go func() { // Telegram → клиент
 		defer wg.Done()
 		defer shutdown()
+		if len(initial) > 0 {
+			client.Rev.XORKeyStream(initial, initial)
+			st.BytesDown.Add(int64(len(initial)))
+			down.Add(int64(len(initial)))
+			if _, err := c.Write(initial); err != nil {
+				finish("client write", err)
+				return
+			}
+		}
 		for {
 			msg, err := w.Recv()
 			if err != nil {

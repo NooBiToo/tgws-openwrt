@@ -517,16 +517,17 @@ func TestTimeoutOnTheFirstDomainTriesTheNextOne(t *testing.T) {
 	}
 }
 
-func TestUnknownPlainClientFallsBackWithoutWebSocket(t *testing.T) {
+// DC неизвестен, и ни один кандидат его не принял (в этом стенде WebSocket
+// недоступен вовсе): байты клиента, включая то, что прочитано при попытке
+// определить DC, дословно уходят по назначению, а адрес попадает в счётчик
+// неизвестных.
+func TestUnknownPlainClientIsReplayedWhenNoDCAccepts(t *testing.T) {
 	sent := append([]byte{0xef}, []byte("12345678")...)
 	dc := newFakeDC(t, len(sent))
 	h := newHarness(t, netip.MustParseAddrPort("1.2.3.4:443"), nil, dc)
 	h.dial(t).Write(sent)
 	if got := recvBytes(t, dc.got); string(got) != string(sent) {
 		t.Fatal("bytes must be replayed verbatim")
-	}
-	if h.dialWS.Load() != 0 {
-		t.Fatal("an address with no known DC must not open a WebSocket")
 	}
 	if u := h.srv.Stats().Snapshot().UnknownDC; len(u) != 1 || u[0] != "1.2.3.4" {
 		t.Fatalf("unknown_dc = %v", u)
