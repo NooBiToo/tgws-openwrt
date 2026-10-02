@@ -1,0 +1,60 @@
+#!/bin/sh
+# Обновляет список подсетей Telegram из официального cidr.txt.
+#   update-subnets
+# Печатает на stdout "updated N" или "unchanged"; код 1 — обновить не удалось,
+# и прежний список остаётся нетронутым.
+#
+# Переменные окружения (для тестов и для зеркала): TGWS_SUBNETS_URL, TGWS_SUBNETS
+# (куда писать), TGWS_CURL. Если прямой доступ к core.telegram.org с роутера
+# заблокирован, обновление не удастся — тогда остаётся зашитый или прежний
+# список, а в настройках можно указать другой адрес.
+
+URL="${TGWS_SUBNETS_URL:-https://core.telegram.org/resources/cidr.txt}"
+OUT="${TGWS_SUBNETS:-/etc/tgws/subnets.txt}"
+CURL="${TGWS_CURL:-curl}"
+
+# shellcheck disable=SC1091
+. "$(dirname "$0")/subnets.sh"
+
+die() {
+	echo "update-subnets: $*" >&2
+	logger -t tgws "update-subnets: $*" 2>/dev/null
+	exit 1
+}
+
+# Адрес идёт в аргумент curl, а не в оболочку, но проверяется всё равно:
+# странное значение должно остановить обновление, а не уйти в запрос.
+case "$URL" in
+	http://*|https://*) ;;
+	*) die "unsupported URL '$URL'" ;;
+esac
+case "$URL" in
+	*[!A-Za-z0-9._~:/?\&=%+-]*) die "unsupported characters in the URL" ;;
+esac
+
+tmp=$(mktemp -d) || die "cannot create a temporary directory"
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# -4: правила перехвата только для IPv4. Срок короткий: обновление идёт из cron
+# и не должно висеть, если Telegram с роутера недоступен.
+"$CURL" -fsS -4 --max-time 25 -o "$tmp/raw" "$URL" || die "download failed"
+
+valid_subnets < "$tmp/raw" | sort -u > "$tmp/valid"
+n=$(wc -l < "$tmp/valid" | tr -d ' ')
+
+# Слишком мало или слишком много — так выглядит усечённая или подменённая
+# выдача; прежний список лучше такого.
+{ [ "$n" -ge 3 ] && [ "$n" -le 200 ]; } || die "implausible list: $n valid subnets"
+
+if [ -f "$OUT" ] && cmp -s "$tmp/valid" "$OUT"; then
+	echo "unchanged"
+	exit 0
+fi
+
+mkdir -p "$(dirname "$OUT")" || die "cannot create $(dirname "$OUT")"
+# Запись через временный файл рядом и mv: прерванная запись не должна оставить
+# половину списка в файле, который читает генератор правил.
+if ! { cp "$tmp/valid" "$OUT.new" && mv -f "$OUT.new" "$OUT"; }; then
+	die "cannot write $OUT"
+fi
+echo "updated $n"

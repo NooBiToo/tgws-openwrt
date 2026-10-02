@@ -138,6 +138,16 @@ return view.extend({
 			return _('Expected a number like 0x9527');
 		};
 
+		o = s.option(form.Value, 'subnets_url', _('Telegram subnet list URL'),
+			_('Once a week the router refreshes the list of Telegram subnets from this address. Empty means the official core.telegram.org list. If that address is blocked from the router, the built-in or the last downloaded list stays in use; you can point this to a reachable mirror.'));
+		o.placeholder = 'https://core.telegram.org/resources/cidr.txt';
+		o.optional = true;
+		o.validate = function(section_id, value) {
+			if (value === '' || /^https?:\/\/[A-Za-z0-9._~:\/?&=%+-]+$/.test(value))
+				return true;
+			return _('Expected an http(s) address');
+		};
+
 		return m.render().then(function(formNode) {
 			return E('div', {}, [
 				E('h2', {}, _('Telegram')),

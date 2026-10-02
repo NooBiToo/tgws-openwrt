@@ -36,6 +36,7 @@ jobs:
           need="packages/luci-app-tgws/root/etc/init.d/tgws
           packages/luci-app-tgws/root/etc/uci-defaults/40-luci-tgws
           packages/luci-app-tgws/root/usr/libexec/tgws/gen-nft
+          packages/luci-app-tgws/root/usr/libexec/tgws/update-subnets
           tests/run.sh
           install.sh"
           fail=0
@@ -57,6 +58,8 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src koalaman/shellcheck:v0.11.0 -s sh \
             install.sh tests/run.sh scripts/build.sh scripts/test.sh \
             packages/luci-app-tgws/root/usr/libexec/tgws/gen-nft \
+            packages/luci-app-tgws/root/usr/libexec/tgws/update-subnets \
+            packages/luci-app-tgws/root/usr/libexec/tgws/subnets.sh \
             packages/luci-app-tgws/root/etc/uci-defaults/40-luci-tgws
 
       - name: Shell syntax of the init script

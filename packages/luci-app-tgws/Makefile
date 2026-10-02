@@ -32,6 +32,9 @@ define Build/Compile
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/init.d/tgws
 	chmod 0755 $(PKG_BUILD_DIR)/root/etc/uci-defaults/40-luci-tgws
 	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/tgws/gen-nft
+	chmod 0755 $(PKG_BUILD_DIR)/root/usr/libexec/tgws/update-subnets
+	# subnets.sh подключается через `.`, запускать его не нужно.
+	chmod 0644 $(PKG_BUILD_DIR)/root/usr/libexec/tgws/subnets.sh
 endef
 
 # call BuildPackage - OpenWrt buildroot signature

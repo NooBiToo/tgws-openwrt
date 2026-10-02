@@ -3,4 +3,15 @@
 # отдельна от автозапуска: служба стартует при загрузке всегда, а сама решает,
 # работать ли ей.
 /etc/init.d/tgws enable >/dev/null 2>&1
+
+# Раз в неделю список подсетей Telegram обновляется. Идемпотентно: повторная
+# установка не дублирует строку. Если обновить не удалось (прямой доступ к
+# core.telegram.org заблокирован), остаётся прежний или зашитый список.
+mkdir -p /etc/crontabs
+touch /etc/crontabs/root
+if ! grep -q 'tgws update_subnets' /etc/crontabs/root; then
+	echo '23 4 * * 1 /etc/init.d/tgws update_subnets >/dev/null 2>&1' >> /etc/crontabs/root
+	/etc/init.d/cron enable >/dev/null 2>&1
+	/etc/init.d/cron restart >/dev/null 2>&1
+fi
 exit 0

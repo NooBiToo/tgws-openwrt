@@ -21,6 +21,15 @@ msgstr "Пары DC:IP через запятую. Дата-центры, кот�
 msgid "Enable"
 msgstr "Включить"
 
+msgid "Expected an http(s) address"
+msgstr "Ожидается адрес http(s)"
+
+msgid "Telegram subnet list URL"
+msgstr "Адрес списка подсетей Telegram"
+
+msgid "Once a week the router refreshes the list of Telegram subnets from this address. Empty means the official core.telegram.org list. If that address is blocked from the router, the built-in or the last downloaded list stays in use; you can point this to a reachable mirror."
+msgstr "Раз в неделю роутер обновляет список подсетей Telegram по этому адресу. Пусто — официальный список core.telegram.org. Если этот адрес с роутера недоступен, остаётся зашитый или последний скачанный список; можно указать доступное зеркало."
+
 msgid "Expected a number like 0x9527"
 msgstr "Ожидается число вида 0x9527"
 

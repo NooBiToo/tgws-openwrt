@@ -245,6 +245,46 @@ assert_contains "$(calls)" "nft delete table inet tgws" "stop removes the table"
 # После остановки LuCI не должен показывать счётчики давно умершего процесса.
 assert_eq "no" "$([ -e "$STATS" ] && echo yes || echo no)" "stop removes the stats file"
 
+# --- обновление списка подсетей -----------------------------------------------
+# Команда update_subnets запускает update-subnets и перезагружает правила
+# только если список изменился и демон работает.
+mkdir -p "$sandbox/lib"
+cat > "$sandbox/lib/update-subnets" <<'EOF'
+#!/bin/sh
+echo "update-subnets run" >> "$CALLS"
+echo "${UPD_OUT:-unchanged}"
+exit "${UPD_RC:-0}"
+EOF
+cp "$GEN_DIR/gen-nft" "$GEN_DIR/subnets.sh" "$sandbox/lib/"
+chmod +x "$sandbox/lib/update-subnets" "$sandbox/lib/gen-nft"
+LIBDIR="$sandbox/lib"
+
+reset
+U_ENABLED=1; daemon_up; UPD_OUT="updated 9"; export UPD_OUT
+update_subnets; rc=$?
+assert_eq "0" "$rc" "update_subnets succeeds"
+assert_contains "$(calls)" "nft -f" "a changed list reloads the rules while the daemon runs"
+
+reset
+U_ENABLED=1; daemon_up; UPD_OUT="unchanged"; export UPD_OUT
+update_subnets
+assert_eq "0" "$(calls | grep -c '^nft ')" "an unchanged list does not touch the rules"
+
+# Демон не работает — загружать таблицу нельзя: перенаправлять в закрытый порт.
+reset
+U_ENABLED=1; UPD_OUT="updated 9"; export UPD_OUT
+update_subnets
+assert_eq "0" "$(calls | grep -c '^nft ')" "a changed list does not load the table when the daemon is down"
+
+reset
+U_ENABLED=1; daemon_up; UPD_OUT="boom"; UPD_RC=1; export UPD_OUT UPD_RC
+update_subnets; rc=$?
+assert_eq "1" "$rc" "a failed update fails"
+assert_contains "$(calls)" "subnet list update failed" "a failed update is logged"
+assert_eq "0" "$(calls | grep -c '^nft ')" "a failed update leaves the rules alone"
+unset UPD_OUT UPD_RC
+LIBDIR="$GEN_DIR"
+
 # --- триггер перезагрузки ----------------------------------------------------
 reset
 service_triggers

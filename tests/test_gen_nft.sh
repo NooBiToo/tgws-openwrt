@@ -29,6 +29,30 @@ close=$(printf '%s\n' "$out" | tr -cd '}' | wc -c)
 assert_eq "$open" "$close" "braces are balanced"
 assert_eq "0" "$(printf '%s\n' "$out" | grep -c ' ip6 ')" "ipv6 is not touched"
 
+# Список подсетей можно обновлять (скрипт update-subnets кладёт его в файл):
+# если файл есть и в нём есть годные строки, берётся он, иначе зашитый.
+cat > "$TT_TEST_TMP/subnets.txt" <<'EOF'
+# comment
+149.154.160.0/20
+203.0.113.0/24
+not-a-subnet
+999.1.1.0/24
+10.0.0.0/8
+EOF
+upd="$(TGWS_SUBNETS="$TT_TEST_TMP/subnets.txt" sh "$GEN" 5454 br-lan)"
+assert_contains "$upd" "203.0.113.0/24" "a subnet from the updated file is used"
+assert_contains "$upd" "149.154.160.0/20" "the main range stays"
+assert_eq "0" "$(printf '%s\n' "$upd" | grep -c '91.108.4.0/22')" "the built-in list is replaced, not merged"
+assert_eq "0" "$(printf '%s\n' "$upd" | grep -c 'not-a-subnet\|999.1.1.0\|10.0.0.0/8')" "invalid and private lines are ignored"
+open=$(printf '%s\n' "$upd" | tr -cd '{' | wc -c); close=$(printf '%s\n' "$upd" | tr -cd '}' | wc -c)
+assert_eq "$open" "$close" "braces stay balanced with an updated list"
+
+# Файл без единой годной строки (например, страница с ошибкой) не должен
+# оставить таблицу без подсетей: берётся зашитый список.
+printf '<html>error</html>\n' > "$TT_TEST_TMP/garbage.txt"
+assert_contains "$(TGWS_SUBNETS="$TT_TEST_TMP/garbage.txt" sh "$GEN" 5454 br-lan)" "91.108.4.0/22" "a file with no valid subnet falls back to the built-in list"
+assert_contains "$(TGWS_SUBNETS="$TT_TEST_TMP/missing.txt" sh "$GEN" 5454 br-lan)" "91.108.4.0/22" "a missing file falls back to the built-in list"
+
 # Порт.
 assert_exit 2 "port 0 is rejected" sh "$GEN" 0 br-lan
 assert_exit 2 "port 70000 is rejected" sh "$GEN" 70000 br-lan

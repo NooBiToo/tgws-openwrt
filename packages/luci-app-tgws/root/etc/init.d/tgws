@@ -28,6 +28,7 @@ read_settings() {
 	config_get DC_IP main dc_ip "2:149.154.167.220,4:149.154.167.220"
 	config_get LAN main lan_devices ""
 	config_get FALLBACK_MARK main fallback_mark ""
+	config_get SUBNETS_URL main subnets_url ""
 	case "$PORT" in
 		''|*[!0-9]*) logger -t tgws "warning: bad port '$PORT', using 5454"; PORT=5454 ;;
 		*)
@@ -173,6 +174,29 @@ stop_service() {
 	# Демон удаляет файл и сам, но убитый сигналом KILL не успеет; а LuCI не
 	# должен показывать счётчики давно умершего процесса.
 	rm -f "$STATS"
+	return 0
+}
+
+EXTRA_COMMANDS="update_subnets"
+EXTRA_HELP="	update_subnets	Refresh the Telegram subnet list and reload the rules"
+
+# Обновляет список подсетей Telegram и, если он изменился и демон работает,
+# перезагружает правила. Таблицу при неработающем демоне не загружаем:
+# перенаправлять в закрытый порт нельзя.
+update_subnets() {
+	read_settings
+	if ! _res=$(TGWS_SUBNETS_URL="$SUBNETS_URL" "$LIBDIR/update-subnets" 2>&1); then
+		logger -t tgws "subnet list update failed: $_res"
+		return 1
+	fi
+	case "$_res" in
+		updated*)
+			logger -t tgws "subnet list $_res"
+			if [ "$ENABLED" = "1" ] && daemon_ready; then
+				load_nft "$PORT" "$LAN"
+			fi
+			;;
+	esac
 	return 0
 }
 
