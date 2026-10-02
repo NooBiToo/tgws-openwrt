@@ -1,0 +1,10 @@
+/dist/
+/out/
+*.apk
+.claude/
+.superpowers/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
