@@ -324,7 +324,7 @@ return {
 			let out = { package: null, daemon: null, latest: null, update_available: false,
 			            ahead: false, checked_at: null, stale: false };
 			out.daemon = daemon_version();
-			// apk печатает "luci-app-tgws-0.1.0-r1 noarch {...} [installed]".
+			// apk печатает "luci-app-tgws-0.1.1-r1 noarch {...} [installed]".
 			let rp = sh_out('apk list -I luci-app-tgws');
 			let mp = match(trim(rp.out), /luci-app-tgws-([^ \t\n]+)/);
 			if (mp) out.package = mp[1];
