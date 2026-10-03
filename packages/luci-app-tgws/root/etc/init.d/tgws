@@ -94,7 +94,7 @@ start_service() {
 	read_settings
 	[ "$ENABLED" = "1" ] || {
 		drop_nft
-		logger -t tgws "disabled in configuration, not starting"
+		logger -t tgws "disabled in configuration, not starting; to enable: uci set tgws.main.enabled=1; uci commit tgws; /etc/init.d/tgws restart"
 		return 0
 	}
 	[ -x "$BIN" ] || {

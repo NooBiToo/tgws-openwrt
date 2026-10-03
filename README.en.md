@@ -57,13 +57,17 @@ sh -c "$(wget -O - https://raw.githubusercontent.com/NooBiToo/tgws-openwrt/main/
 ```
 
 The installer checks compatibility and installs the dependencies, the daemon binary, the LuCI package and
-the Russian translation. After installation the service is off.
+the Russian translation. A first install turns the service on right away; run the installer with
+`TGWS_ENABLE=0` to keep it off. An update leaves the current state (on or off) unchanged.
 
-### 2. Turn the acceleration on
+### 2. Configure the acceleration
 
-1. Open **Services → Telegram → Settings**.
-2. Turn on **Enable** and press **Save & Apply**.
-3. If you have [TrustTunnel](https://github.com/NooBiToo/TrustTunnelOpenWrt) and direct access to Telegram is closed,
+If the service is off (installed with `TGWS_ENABLE=0`, or you turned it off), turn it on:
+**Services → Telegram → Settings → Enable → Save & Apply**.
+
+Optional:
+
+- If you have [TrustTunnel](https://github.com/NooBiToo/TrustTunnelOpenWrt) and direct access to Telegram is closed,
    pick the tunnel (`0x9527`) on the **Other traffic** tab: what cannot go over WebSocket will go through it.
 
 ### 3. Check the result

@@ -94,6 +94,11 @@ if ! { cp "$tmp/tgws" "$BIN.new" && chmod 0755 "$BIN.new" && mv -f "$BIN.new" "$
 fi
 [ -x "$BIN" ] || die "the daemon was not installed"
 
+# Первая установка определяется по конфигу ДО установки пакета: обновление не
+# должно включать службу, которую пользователь сознательно выключил.
+fresh=0
+[ -e /etc/config/tgws ] || fresh=1
+
 say "== Installing the package"
 apk add --allow-untrusted "$tmp/pkg.apk"
 if [ -f "$tmp/i18n.apk" ]; then
@@ -111,6 +116,23 @@ if [ "$was_running" = "1" ]; then
 	/etc/init.d/tgws restart || say "warning: the service did not start; see 'logread -e tgws'"
 fi
 
+# Первая установка сразу включает службу: пакет без работающего перехвата
+# бесполезен, а запускать установщик — уже осознанное решение. TGWS_ENABLE=0
+# оставляет службу выключенной.
+if [ "$fresh" = "1" ] && [ "${TGWS_ENABLE:-1}" != "0" ]; then
+	say "== Enabling the service"
+	uci set tgws.main.enabled='1' && uci commit tgws
+	/etc/init.d/tgws restart || say "warning: the service did not start; see 'logread -e tgws'"
+	enabled_now=1
+fi
+
 say ""
 say "== Done"
-say "Open LuCI: Services -> Telegram, turn it on and press Save & Apply."
+if [ "${enabled_now:-0}" = "1" ]; then
+	say "The service is on. Settings: LuCI -> Services -> Telegram."
+elif [ "$(uci -q get tgws.main.enabled)" = "1" ]; then
+	say "Settings: LuCI -> Services -> Telegram."
+else
+	say "The service is OFF. Turn it on in LuCI -> Services -> Telegram (Save & Apply), or:"
+	say "  uci set tgws.main.enabled='1' && uci commit tgws && /etc/init.d/tgws restart"
+fi

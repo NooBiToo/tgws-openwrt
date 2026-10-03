@@ -24,6 +24,12 @@ assert_eq "yes" "$([ -n "$bin_line" ] && [ -n "$apk_line" ] && [ "$bin_line" -lt
 # командная строка означает «уже запущено», и старый код продолжил бы работать.
 assert_contains "$(cat "$F")" "/etc/init.d/tgws restart" "an update restarts the service"
 
+# Первая установка включает службу, обновление — нет: признак берётся до apk add.
+fresh_line=$(grep -n "^\[ -e /etc/config/tgws \] || fresh=1" "$F" | head -n1 | cut -d: -f1)
+assert_eq "yes" "$([ -n "$fresh_line" ] && [ -n "$apk_line" ] && [ "$fresh_line" -lt "$apk_line" ] && echo yes || echo no)" 	"first install is detected before the package is installed"
+assert_contains "$(cat "$F")" "uci set tgws.main.enabled='1'" "a first install enables the service"
+assert_contains "$(cat "$F")" 'TGWS_ENABLE:-1' "TGWS_ENABLE=0 opts out"
+
 # Выбор архитектуры: настоящий фрагмент скрипта на реальных значениях DISTRIB_ARCH.
 sed -n '/^case "\$DISTRIB_ARCH" in/,/^esac/p' "$F" > "$TT_TEST_TMP/arch.sh"
 suffix_for() {
