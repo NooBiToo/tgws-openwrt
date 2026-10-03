@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  SDK_ARCH: x86-64-25.12.5
+
 jobs:
   binaries:
     runs-on: ubuntu-latest
@@ -46,18 +49,57 @@ jobs:
       - name: Prepare the artifacts directory
         run: mkdir -p out
 
-      # FEED_DIR — весь репозиторий и АБСОЛЮТНЫЙ путь: действие подставляет его
-      # в `docker run -v`, а относительное значение docker читает как имя тома
-      # и монтирует пустоту. Нужен и .git: luci.mk берёт версию пакета перевода
-      # из `git log`.
-      - name: Build package via OpenWrt SDK Action
-        uses: openwrt/gh-action-sdk@v7
-        env:
-          ARCH: x86-64-25.12.5
-          FEEDNAME: tgws
-          FEED_DIR: ${{ github.workspace }}
-          ARTIFACTS_DIR: ${{ github.workspace }}/out
-          PACKAGES: luci-app-tgws
+      # Действие openwrt/gh-action-sdk при каждом запуске скачивает архив SDK
+      # (285 МБ) с зеркала со скоростью около 500 КБ/с — это ~9,5 из 17 минут
+      # сборки, и подсунуть ему кэш нельзя: docker run зашит в действие. Поэтому
+      # запускаем тот же образ и тот же entrypoint.sh сами, а архив берём из
+      # кэша; в контейнере его распаковывает подменённый setup.sh.
+      - name: Cache the SDK archive
+        uses: actions/cache@v6
+        with:
+          path: ~/sdk-cache
+          key: openwrt-sdk-${{ env.SDK_ARCH }}
+
+      - name: Download the SDK archive
+        run: |
+          mkdir -p ~/sdk-cache
+          [ -s ~/sdk-cache/sdk.tar.zst ] && exit 0
+          base="https://downloads.openwrt.org/releases/${SDK_ARCH#x86-64-}/targets/x86/64"
+          curl -fsSL --retry 3 "$base/sha256sums" -o sums
+          line=$(grep -E ' \*openwrt-sdk-.*x86-64_.*\.tar\.zst$' sums)
+          [ -n "$line" ] || { echo "::error::no SDK archive in sha256sums"; exit 1; }
+          file=${line#*\*}
+          curl -fL --retry 3 -o ~/sdk-cache/sdk.tar.zst "$base/$file"
+          echo "$(echo "$line" | cut -d' ' -f1)  $HOME/sdk-cache/sdk.tar.zst" | sha256sum -c -
+
+      # entrypoint.sh закреплён по коммиту: незакреплённый скрипт из чужого
+      # репозитория исполнялся бы с правом записи в наш релиз.
+      - name: Fetch the SDK action entrypoint
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/entrypoint.sh" \
+            https://raw.githubusercontent.com/openwrt/gh-action-sdk/eccf7b6259d61fb8b137bae57bca8d695e0856f3/entrypoint.sh
+          chmod +x "$RUNNER_TEMP/entrypoint.sh"
+          printf '%s\n' 'set -e' 'tar xf /sdk.tar.zst --strip=1 --no-same-owner -C .' > "$RUNNER_TEMP/setup.sh"
+
+      # Каталог репозитория — это и есть фид (монтируется в /feed), нужен весь,
+      # с .git: luci.mk берёт версию пакета перевода из `git log`. Права 1000 —
+      # у пользователя buildbot внутри контейнера.
+      - name: Build package in the OpenWrt SDK
+        run: |
+          sudo chown -R 1000:1000 "$GITHUB_WORKSPACE"
+          docker run --rm \
+            --env FEEDNAME=tgws --env PACKAGES=luci-app-tgws \
+            --entrypoint /entrypoint.sh \
+            -v "$RUNNER_TEMP/entrypoint.sh:/entrypoint.sh:ro" \
+            -v "$RUNNER_TEMP/setup.sh:/builder/setup.sh:ro" \
+            -v "$HOME/sdk-cache/sdk.tar.zst:/sdk.tar.zst:ro" \
+            -v "$GITHUB_WORKSPACE/out:/artifacts" \
+            -v "$GITHUB_WORKSPACE:/feed" \
+            "ghcr.io/openwrt/sdk:$SDK_ARCH"
+
+      - name: Restore file ownership
+        if: always()
+        run: sudo chown -R --reference="$GITHUB_WORKSPACE/.." "$GITHUB_WORKSPACE"
 
       - name: Collect artifacts
         run: |
