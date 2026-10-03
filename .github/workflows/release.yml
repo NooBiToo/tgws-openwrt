@@ -77,7 +77,7 @@ jobs:
       - name: Fetch the SDK action entrypoint
         run: |
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/entrypoint.sh" \
-            https://raw.githubusercontent.com/openwrt/gh-action-sdk/eccf7b6259d61fb8b137bae57bca8d695e0856f3/entrypoint.sh
+            https://raw.githubusercontent.com/openwrt/gh-action-sdk/0c00b28c11bed5c7697e807d4cb8ef176ca688ef/entrypoint.sh
           chmod +x "$RUNNER_TEMP/entrypoint.sh"
           printf '%s\n' 'set -e' 'tar xf /sdk.tar.zst --strip=1 --no-same-owner -C .' > "$RUNNER_TEMP/setup.sh"
 
